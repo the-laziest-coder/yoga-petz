@@ -16,7 +16,8 @@ from twitter import Twitter
 from well3 import Well3
 from account import Account
 from config import DO_TASKS, CHECK_INSIGHTS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
-    WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, SKIP_FIRST_ACCOUNTS
+    WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
+    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY
 from utils import wait_a_bit, async_retry
 
 
@@ -265,7 +266,7 @@ def main():
     print()
     logger.info('Finished. Refreshing accounts profiles')
 
-    loop.run_until_complete(process(batches, storage, invites_handler, refresh_account, sleep=True))
+    loop.run_until_complete(process(batches, storage, invites_handler, refresh_account, sleep=MOBILE_PROXY))
 
     storage.save()
 
