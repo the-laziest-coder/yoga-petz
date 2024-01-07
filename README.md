@@ -9,19 +9,26 @@
 ### Follow: https://t.me/thelaziestcoder
 
 ### Settings
-`files/wallets.txt` - Wallets with private keys \
-`files/proxies.txt` - Corresponding proxies for wallets \
-`files/twitters.txt` - Corresponding twitters for wallets \
-`files/invites.txt` - Invites for registration \
-`config.py` - Custom settings \
+ - `files/wallets.txt` - Wallets with private keys
+ - `files/proxies.txt` - Corresponding proxies for wallets
+ - `files/twitters.txt` - Corresponding twitters for wallets
+ - `files/invites.txt` - Invites for registration
+ - `config.py` - Custom settings
 
 ### Run
 
+Installing virtual env: \
+`python3 -m venv venv`
+
+Activating:
+ - Mac/Linux - `source venv/bin/activate`
+ - Windows - `.\venv\Scripts\activate`
+
 Installing all dependencies: \
-`pip3 install -r requirements.txt`
+`pip install -r requirements.txt`
 
 Run main script: \
-`python3 main.py`
+`python main.py`
 
 ### Results
 
