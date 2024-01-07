@@ -12,7 +12,7 @@ from web3.exceptions import TransactionNotFound
 from well3 import Well3
 from twitter import Twitter
 from models import AccountInfo
-from config import MIN_INSIGHTS_TO_OPEN
+from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
     INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN
 from utils import wait_a_bit, get_w3, to_bytes, async_retry
@@ -121,13 +121,19 @@ class Account:
 
             match special['action']:
                 case 'twitter-check-posted-media':
+                    if FAKE_TWITTER:
+                        return True
                     tweet_url = await self.post_tweet()
                     logger.info(f'{self.idx}) Tweet posted: {tweet_url}')
                 case 'twitter-check-follow-profile':
+                    if FAKE_TWITTER:
+                        return True
                     follow_username = special['data']['url'].split('/')[-1]
                     await self.twitter.follow(follow_username)
                     logger.info(f'{self.idx}) {follow_username} followed')
                 case 'twitter-check-retweet':
+                    if FAKE_TWITTER:
+                        return True
                     tweet_id = special['data']['rtRequiredTweetId']
                     await self.twitter.retweet(tweet_id)
                     await wait_a_bit()
@@ -138,11 +144,14 @@ class Account:
                     logger.warning(f'{self.idx}) Changing profile name is not supported yet')
                     return False
                 case 'twitter-check-profile-banner':
+                    if FAKE_TWITTER:
+                        return True
                     logger.warning(f'{self.idx}) Changing banner is not supported yet')
                     return False
                 case unknown_action:
-                    logger.warning(f'{self.idx}) Unknown special action {unknown_action}')
-                    return False
+                    suffix = '. Trying to verify anyway' if FAKE_TWITTER else ''
+                    logger.warning(f'{self.idx}) Unknown special action {unknown_action}{suffix}')
+                    return FAKE_TWITTER
 
         return True
 
