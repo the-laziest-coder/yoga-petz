@@ -81,7 +81,6 @@ class Account:
                 task_title = task_title[:a_start_open] + task_title[a_start_close + 2:]
             title = f"{task_title} [Exp: {task_info['exp']}]"
             if task_info['expClaimed']:
-                logger.success(f'{self.idx}) {title} already done')
                 continue
             if task_id in self.pending_quests:
                 logger.info(f'{self.idx}) {title} in pending verify')
