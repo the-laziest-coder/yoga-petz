@@ -193,7 +193,7 @@ class Account:
             'from': self.account.address,
             'nonce': await self.w3.eth.get_transaction_count(self.account.address),
             'gas': 300000,
-            'gasPrice': await self.w3.eth.gas_price,
+            'gasPrice': 10008,
         })
 
         signed_tx = self.w3.eth.account.sign_transaction(tx, self.private_key)
