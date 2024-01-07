@@ -188,10 +188,10 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
 
 async def process_batch(batch: List[Tuple[int, Tuple[str, str, str]]], storage: Storage, invites: InvitesHandler,
-                        async_func) -> int:
+                        async_func, sleep) -> int:
     used_invites = 0
     for idx, d in enumerate(batch):
-        if idx != 0:
+        if sleep and idx != 0:
             await asyncio.sleep(random.uniform(WAIT_BETWEEN_ACCOUNTS[0], WAIT_BETWEEN_ACCOUNTS[1]))
         try:
             result = await async_func(d, storage, invites)
@@ -212,10 +212,10 @@ async def process_batch(batch: List[Tuple[int, Tuple[str, str, str]]], storage: 
 
 
 async def process(batches: List[List[Tuple[int, Tuple[str, str, str]]]], storage: Storage, invites: InvitesHandler,
-                  async_func):
+                  async_func, sleep=True):
     tasks = []
     for b in batches:
-        tasks.append(asyncio.create_task(process_batch(b, storage, invites, async_func)))
+        tasks.append(asyncio.create_task(process_batch(b, storage, invites, async_func, sleep)))
     return await asyncio.gather(*tasks)
 
 
@@ -260,10 +260,12 @@ def main():
 
     used_invites = sum(results)
 
+    storage.save()
+
     print()
     logger.info('Finished. Refreshing accounts profiles')
 
-    loop.run_until_complete(process(batches, storage, invites_handler, refresh_account))
+    loop.run_until_complete(process(batches, storage, invites_handler, refresh_account, sleep=True))
 
     storage.save()
 
@@ -319,7 +321,7 @@ def main():
     csv_data.append(['Timestamp', run_timestamp])
 
     with open('results/stats.csv', 'w', encoding='utf-8', newline='') as file:
-        writer = csv.writer(file, delimiter=',')
+        writer = csv.writer(file, delimiter=';')
         writer.writerows(csv_data)
 
     with open('results/invites.txt', 'w', encoding='utf-8') as file:
