@@ -17,6 +17,8 @@
 
 ### Run
 
+Python version: 3.10+
+
 Installing virtual env: \
 `python3 -m venv venv`
 
