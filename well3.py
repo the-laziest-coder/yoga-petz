@@ -160,7 +160,8 @@ class Well3:
                     with_text=True
                 )
             except Exception as e:
-                raise Exception(f'Failed to get twitter oauth verifier: {str(e)}')
+                reason = 'This account is suspended: ' if 'This account is suspended' in str(e) else ''
+                raise Exception(f'Failed to get twitter oauth verifier: {reason}{str(e)}')
 
         verify_link = f'{self.AUTH_API_URL}?state={state}&oauth_token={oauth_token}&oauth_verifier={oauth_verifier}'
 
