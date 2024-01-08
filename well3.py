@@ -37,11 +37,14 @@ class Well3:
     AUTH_API_URL = 'https://well3.com/assets/__/auth/handler'
     API_URL = 'https://api.gm.io'
 
-    X_CLIENT_VERSION = 'Chrome/JsCore/10.7.1/FirebaseCore-web'
-    X_FIREBASE_GMPID = '1:322732006318:web:7d8d136900837cb38b463f'
-    GOOGLE_HEADERS = {
-        'x-client-version': X_CLIENT_VERSION,
-        'x-firebase-gmpid': X_FIREBASE_GMPID,
+    GOOGLE_CREATE_AUTH_HEADERS = {
+        'x-client-version': 'Chrome/Handler/2.20.2/FirebaseCore-web',
+        #'x-client-data': 'CJjeygE=',
+    }
+    GOOGLE_SIGN_IN_HEADERS = {
+        'x-client-version': 'Chrome/JsCore/10.7.1/FirebaseCore-web',
+        'x-firebase-gmpid': '1:322732006318:web:7d8d136900837cb38b463f',
+        #'x-client-data': 'CJjeygE=',
     }
 
     def __init__(self, idx: Union[int, str], account: AccountInfo, twitter: Twitter):
@@ -116,7 +119,7 @@ class Well3:
                 headers={
                     'origin': 'https://well3.com',
                     'referer': f'https://well3.com/',
-                    **self.GOOGLE_HEADERS,
+                    **self.GOOGLE_CREATE_AUTH_HEADERS,
                 },
                 acceptable_statuses=[200],
                 resp_handler=_create_auth_handle
@@ -178,7 +181,7 @@ class Well3:
                     'returnIdpCredential': True,
                     'returnSecureToken': True,
                     'sessionId': session_id,
-                }, headers=self.GOOGLE_HEADERS, acceptable_statuses=[200], resp_handler=_google_sign_in)
+                }, headers=self.GOOGLE_SIGN_IN_HEADERS, acceptable_statuses=[200], resp_handler=_google_sign_in)
         except Exception as e:
             raise Exception(f'Failed to sign in with verify link: {str(e)}')
 
@@ -203,7 +206,7 @@ class Well3:
 
             await self.request('POST',
                                f'https://securetoken.googleapis.com/v1/token?key={SITE_API_KEY}', data=data,
-                               headers=self.GOOGLE_HEADERS, acceptable_statuses=[200], resp_handler=_handler)
+                               headers=self.GOOGLE_SIGN_IN_HEADERS, acceptable_statuses=[200], resp_handler=_handler)
 
         except Exception as e:
             raise Exception(f'Failed to get account profile: {str(e)}')
