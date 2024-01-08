@@ -39,12 +39,12 @@ class Well3:
 
     GOOGLE_CREATE_AUTH_HEADERS = {
         'x-client-version': 'Chrome/Handler/2.20.2/FirebaseCore-web',
-        #'x-client-data': 'CJjeygE=',
+        # 'x-client-data': 'CJjeygE=',
     }
     GOOGLE_SIGN_IN_HEADERS = {
         'x-client-version': 'Chrome/JsCore/10.7.1/FirebaseCore-web',
         'x-firebase-gmpid': '1:322732006318:web:7d8d136900837cb38b463f',
-        #'x-client-data': 'CJjeygE=',
+        # 'x-client-data': 'CJjeygE=',
     }
 
     def __init__(self, idx: Union[int, str], account: AccountInfo, twitter: Twitter):
@@ -125,7 +125,7 @@ class Well3:
                 resp_handler=_create_auth_handle
             )
         except Exception as e:
-            raise Exception(f'Failed to get twitter oauth link: {str(e)}')
+            raise Exception(f'Failed to get oauth link from google: {str(e)}')
 
         def _twitter_start_handler(resp_text):
             if f'href="{self.AUTH_API_URL}?state=' in resp_text \
