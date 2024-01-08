@@ -1,5 +1,4 @@
 import random
-import time
 import brotli
 import json
 import binascii
@@ -8,10 +7,7 @@ import aiohttp
 
 from models import AccountInfo
 from utils import is_empty, handle_response, async_retry
-
-
-def _delay(r, *args, **kwargs):
-    time.sleep(random.uniform(0.5, 1))
+from config import DISABLE_SSL
 
 
 def generate_csrf_token(size=16):
@@ -64,6 +60,9 @@ class Twitter:
         self.cookies.update({'ct0': ct0})
         self.headers.update({'x-csrf-token': ct0})
 
+    def get_conn(self):
+        return None
+
     def set_cookies(self, resp_cookies):
         self.cookies.update({name: value.value for name, value in resp_cookies.items()})
 
@@ -75,7 +74,9 @@ class Twitter:
             headers.update(kwargs.pop('headers'))
         if 'cookies' in kwargs:
             cookies.update(kwargs.pop('cookies'))
-        async with aiohttp.ClientSession(headers=headers, cookies=cookies) as sess:
+        if DISABLE_SSL:
+            kwargs.update({'ssl': False})
+        async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers, cookies=cookies) as sess:
             if method.lower() == 'get':
                 async with sess.get(url, proxy=self.proxy, **kwargs) as resp:
                     self.set_cookies(resp.cookies)
@@ -89,8 +90,11 @@ class Twitter:
 
     async def _get_ct0(self):
         try:
-            async with aiohttp.ClientSession(headers=self.headers, cookies=self.cookies) as sess:
-                async with sess.get('https://twitter.com/i/api/1.1/dm/user_updates.json?', proxy=self.proxy) as resp:
+            kwargs = {'ssl': False} if DISABLE_SSL else {}
+            async with aiohttp.ClientSession(connector=self.get_conn(),
+                                             headers=self.headers, cookies=self.cookies) as sess:
+                async with sess.get('https://twitter.com/i/api/1.1/dm/user_updates.json?',
+                                    proxy=self.proxy, **kwargs) as resp:
                     new_csrf = resp.cookies.get("ct0")
                     if new_csrf is None:
                         raise Exception('Empty new csrf')

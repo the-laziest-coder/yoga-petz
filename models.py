@@ -1,6 +1,8 @@
+import time
+from datetime import timedelta
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json
-from typing import List
+from typing import List, Union
 
 
 @dataclass_json
@@ -17,12 +19,21 @@ class AccountInfo:
     sec_ch_ua_platform: str = ''
     exp: int = 0
     lvl: int = 0
-    next_breathe_time: str = 'Not started'
+    next_breathe_time: Union[int, str] = 'Not started'
     pending_quests: int = 0
     insights_to_open: int = 0
     daily_insight: str = 'unavailable'
     insights: dict[str, int] = field(default_factory=dict)
     invite_codes: List[str] = field(default_factory=list)
+
+    def next_breathe_str(self) -> str:
+        if type(self.next_breathe_time) is str:
+            return self.next_breathe_time
+        diff = self.next_breathe_time - int(time.time() * 1000)
+        diff //= 1000
+        if diff <= 0:
+            return 'Available'
+        return 'in ' + str(timedelta(seconds=diff))
 
     def str_stats(self) -> str:
         insights_str = '\n'.join([f'\t\t{name}: {cnt}' for name, cnt in self.insights.items()])
@@ -30,7 +41,7 @@ class AccountInfo:
         return f'\tExp: {self.exp}\n' \
                f'\tLvl: {self.lvl}\n' \
                f'\tPending quests: {self.pending_quests}\n' \
-               f'\tNext breathe: {self.next_breathe_time}\n' \
+               f'\tNext breathe: {self.next_breathe_str()}\n' \
                f'\tInsights to open: {self.insights_to_open}\n' \
                f'\tDaily insight: {self.daily_insight.capitalize()}\n' \
                f'\tInsights:\n{insights_str}\n' \

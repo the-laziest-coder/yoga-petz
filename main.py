@@ -44,9 +44,15 @@ class InvitesHandler:
             async with self.lock:
 
                 if len(self.invites) != 0:
+                    await asyncio.sleep(WAIT_BETWEEN_ACCOUNTS[0] / THREADS_NUM)
                     return
 
-                for idx, address in enumerate(self.addresses[:AUTO_UPDATE_INVITES_FROM_FIRST_COUNT], start=1):
+                if type(AUTO_UPDATE_INVITES_FROM_FIRST_COUNT) is tuple:
+                    from_addresses = list(enumerate(self.addresses[:AUTO_UPDATE_INVITES_FROM_FIRST_COUNT[1]], start=1))
+                    from_addresses = random.sample(from_addresses, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT[0])
+                else:
+                    from_addresses = list(enumerate(self.addresses[:AUTO_UPDATE_INVITES_FROM_FIRST_COUNT], start=1))
+                for idx, address in from_addresses:
                     if idx != 1:
                         await asyncio.sleep(random.uniform(WAIT_BETWEEN_ACCOUNTS[0], WAIT_BETWEEN_ACCOUNTS[1]))
 
@@ -56,6 +62,9 @@ class InvitesHandler:
 
                     logger.info(f'Updating invites {idx}) Added new {len(account_info.invite_codes)}')
                     self.invites.extend(account_info.invite_codes)
+
+                if type(AUTO_UPDATE_INVITES_FROM_FIRST_COUNT) is tuple:
+                    random.shuffle(self.invites)
 
                 logger.success(f'Invites updated: {len(self.invites)} new')
 
@@ -86,7 +95,7 @@ async def refresh(prefix: str, address: str, storage: Storage):
     if await well3.sign_in_or_start_register_if_needed():
         return None
     account = Account(f'{prefix}', account_info, well3, twitter)
-    await account.check_invite_codes()
+    await account.refresh_profile()
     await storage.set_account_info(address, account_info)
     return account_info
 
@@ -100,7 +109,6 @@ async def refresh_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
 async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storage: Storage, invites: InvitesHandler) \
         -> ProcessResult:
-
     result = ProcessResult()
 
     idx, (wallet, proxy, twitter_token) = account_data
@@ -151,7 +159,6 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
     account = Account(idx, account_info, well3, twitter)
     await account.refresh_profile()
-    await account.check_invite_codes()
 
     logger.info(f'{idx}) Profile refreshed')
 
@@ -164,11 +171,11 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
     try:
         if CLAIM_DAILY_INSIGHT:
-            await wait_a_bit(3)
+            await wait_a_bit(5)
             logger.info(f'{idx}) Starting claim daily insight')
             await account.claim_daily_insight()
         if CLAIM_RANK_INSIGHTS:
-            await wait_a_bit(3)
+            await wait_a_bit(5)
             logger.info(f'{idx}) Starting claim rank insights')
             await account.claim_rank_insights()
     except Exception as e:
@@ -188,8 +195,10 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
     return result
 
 
-async def process_batch(batch: List[Tuple[int, Tuple[str, str, str]]], storage: Storage, invites: InvitesHandler,
+async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
+                        storage: Storage, invites: InvitesHandler,
                         async_func, sleep) -> int:
+    await asyncio.sleep(WAIT_BETWEEN_ACCOUNTS[0] / THREADS_NUM * bid)
     used_invites = 0
     for idx, d in enumerate(batch):
         if sleep and idx != 0:
@@ -215,8 +224,8 @@ async def process_batch(batch: List[Tuple[int, Tuple[str, str, str]]], storage: 
 async def process(batches: List[List[Tuple[int, Tuple[str, str, str]]]], storage: Storage, invites: InvitesHandler,
                   async_func, sleep=True):
     tasks = []
-    for b in batches:
-        tasks.append(asyncio.create_task(process_batch(b, storage, invites, async_func, sleep)))
+    for idx, b in enumerate(batches):
+        tasks.append(asyncio.create_task(process_batch(idx, b, storage, invites, async_func, sleep)))
     return await asyncio.gather(*tasks)
 
 
@@ -234,6 +243,7 @@ def main():
     with open('files/invites.txt', 'r', encoding='utf-8') as file:
         invites = file.read().splitlines()
         invites = [i.strip() for i in invites]
+        invites = [i for i in invites if i != '']
 
     if len(wallets) != len(proxies):
         logger.error('Proxies count does not match wallets count')
@@ -249,15 +259,21 @@ def main():
 
     invites_handler = InvitesHandler(invites, storage, addresses)
 
-    data = list(enumerate(list(zip(wallets, proxies, twitters)), start=1))[SKIP_FIRST_ACCOUNTS:]
-
-    batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(THREADS_NUM)]
-    for idx, d in enumerate(data):
-        batches[idx % THREADS_NUM].append(d)
+    def get_batches(skip: int = None):
+        _data = list(enumerate(list(zip(wallets, proxies, twitters)), start=1))
+        if skip is not None:
+            _data = _data[skip:]
+        _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(THREADS_NUM)]
+        for _idx, d in enumerate(_data):
+            _batches[_idx % THREADS_NUM].append(d)
+        return _batches
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    results = loop.run_until_complete(process(batches, storage, invites_handler, process_account))
+    results = loop.run_until_complete(process(
+        get_batches(SKIP_FIRST_ACCOUNTS),
+        storage, invites_handler, process_account
+    ))
 
     used_invites = sum(results)
 
@@ -266,16 +282,17 @@ def main():
     print()
     logger.info('Finished. Refreshing accounts profiles')
 
-    loop.run_until_complete(process(batches, storage, invites_handler, refresh_account, sleep=MOBILE_PROXY))
+    loop.run_until_complete(process(get_batches(), storage, invites_handler, refresh_account, sleep=MOBILE_PROXY))
 
     storage.save()
 
     print()
     logger.info(f'Used invites: {used_invites}')
 
-    csv_data = [['Address', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
-                 'Daily insight', 'Insights to open', 'Pending quests', 'Next breathe', 'Exp', 'Lvl']]
+    csv_data = [['#', 'Address', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+                 'Daily insight', 'Insights to open', 'Pending quests', 'Next breathe', 'Invite codes', 'Exp', 'Lvl']]
     total = {
+        'total': 0,
         'uncommon': 0,
         'rare': 0,
         'legendary': 0,
@@ -286,16 +303,20 @@ def main():
         'pending': 0,
     }
     all_invite_codes = []
-    for w in wallets:
+    for idx, w in enumerate(wallets, start=1):
         address = EthAccount().from_key(w).address
 
         account = storage.get_final_account_info(address)
         if account is None:
-            csv_data.append([address])
+            csv_data.append([idx, address])
             continue
 
         all_invite_codes.extend(account.invite_codes)
 
+        acc_total = account.insights.get('uncommon', 0) + account.insights.get('rare', 0) \
+                    + account.insights.get('legendary', 0) + account.insights.get('mythical', 0)
+
+        total['total'] += acc_total
         total['uncommon'] += account.insights.get('uncommon', 0)
         total['rare'] += account.insights.get('rare', 0)
         total['legendary'] += account.insights.get('legendary', 0)
@@ -307,19 +328,23 @@ def main():
         total['to_open'] += account.insights_to_open
         total['pending'] += account.pending_quests
 
-        csv_data.append([address, account.insights.get('uncommon'), account.insights.get('rare'),
+        csv_data.append([idx, address, acc_total,
+                         account.insights.get('uncommon'), account.insights.get('rare'),
                          account.insights.get('legendary'), account.insights.get('mythical'),
                          account.daily_insight.capitalize(), account.insights_to_open,
-                         account.pending_quests, account.next_breathe_time, account.exp, account.lvl])
+                         account.pending_quests, account.next_breathe_str(), len(account.invite_codes),
+                         account.exp, account.lvl])
 
-    csv_data.append([])
-    csv_data.append(['Total', total['uncommon'], total['rare'], total['legendary'], total['mythical'],
-                     f'{total["daily_available"]}/{total["daily_claimed"]}',
-                     total['to_open'], total['pending']])
+    csv_data.extend([[], ['', 'Total', total['total'],
+                          total['uncommon'], total['rare'],
+                          total['legendary'], total['mythical'],
+                          f'{total["daily_available"]}/{total["daily_claimed"]}',
+                          total['to_open'], total['pending']]])
+    csv_data.append(['', '', '', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+                     'Daily insight', 'Insights to open', 'Pending quests'])
 
-    csv_data.append([])
     run_timestamp = str(datetime.now())
-    csv_data.append(['Timestamp', run_timestamp])
+    csv_data.extend([[], ['', 'Timestamp', run_timestamp]])
 
     with open('results/stats.csv', 'w', encoding='utf-8', newline='') as file:
         writer = csv.writer(file, delimiter=';')

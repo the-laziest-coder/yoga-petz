@@ -7,6 +7,7 @@ RPC = 'https://opbnb-mainnet-rpc.bnbchain.org'
 THREADS_NUM = 1
 
 MOBILE_PROXY = False
+DISABLE_SSL = False
 
 SKIP_FIRST_ACCOUNTS = 0
 

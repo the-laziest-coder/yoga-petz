@@ -8,6 +8,7 @@ from models import AccountInfo
 from twitter import Twitter
 from utils import is_empty, handle_response, async_retry
 from vars import SITE_API_KEY
+from config import DISABLE_SSL
 
 
 def _get_headers(info: AccountInfo) -> dict:
@@ -33,7 +34,7 @@ def _get_headers(info: AccountInfo) -> dict:
 
 
 class Well3:
-    AUTH_API_URL = 'https://auth.well3.com/__'
+    AUTH_API_URL = 'https://well3.com/assets/__/auth/handler'
     API_URL = 'https://api.gm.io'
 
     X_CLIENT_VERSION = 'Chrome/JsCore/10.7.1/FirebaseCore-web'
@@ -58,17 +59,22 @@ class Well3:
             self.proxy = self.proxy.split('|')[0]
         self.proxy = None if is_empty(self.proxy) else self.proxy
 
+    def get_conn(self):
+        return None
+
     @async_retry
     async def request(self, method, url, acceptable_statuses=None, resp_handler=None, with_text=False, **kwargs):
         headers = self.headers.copy()
         if 'headers' in kwargs:
             headers.update(kwargs.pop('headers'))
-        async with aiohttp.ClientSession() as sess:
+        if DISABLE_SSL:
+            kwargs.update({'ssl': False})
+        async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers) as sess:
             if method.lower() == 'get':
-                async with sess.get(url, headers=headers, proxy=self.proxy, **kwargs) as resp:
+                async with sess.get(url, proxy=self.proxy, **kwargs) as resp:
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             elif method.lower() == 'post':
-                async with sess.post(url, headers=headers, proxy=self.proxy, **kwargs) as resp:
+                async with sess.post(url, proxy=self.proxy, **kwargs) as resp:
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             else:
                 raise Exception('Wrong request method')
@@ -103,13 +109,13 @@ class Well3:
                 'POST',
                 f'https://www.googleapis.com/identitytoolkit/v3/relyingparty/createAuthUri?key={SITE_API_KEY}',
                 json={
-                    'continueUri': f'{self.AUTH_API_URL}/auth/handler',
+                    'continueUri': self.AUTH_API_URL,
                     'customParameter': {},
                     'providerId': 'twitter.com',
                 },
                 headers={
-                    'origin': 'https://auth.well3.com',
-                    'referer': f'https://auth.well3.com/',
+                    'origin': 'https://well3.com',
+                    'referer': f'https://well3.com/',
                     **self.GOOGLE_HEADERS,
                 },
                 acceptable_statuses=[200],
@@ -119,7 +125,7 @@ class Well3:
             raise Exception(f'Failed to get twitter oauth link: {str(e)}')
 
         def _twitter_start_handler(resp_text):
-            if 'href="https://auth.well3.com/__/auth/handler?state=' in resp_text \
+            if f'href="{self.AUTH_API_URL}?state=' in resp_text \
                     and 'oauth_token' in resp_text \
                     and 'oauth_verifier' in resp_text:
                 _state, _oauth_verifier = self._extract_state_and_oauth_verifier(resp_text)
@@ -153,8 +159,7 @@ class Well3:
             except Exception as e:
                 raise Exception(f'Failed to get twitter oauth verifier: {str(e)}')
 
-        verify_link = f'https://auth.well3.com/__/auth/handler?state={state}' \
-                      f'&oauth_token={oauth_token}&oauth_verifier={oauth_verifier}'
+        verify_link = f'{self.AUTH_API_URL}?state={state}&oauth_token={oauth_token}&oauth_verifier={oauth_verifier}'
 
         def _google_sign_in(resp):
             self.account.well3_auth_token = resp['idToken']
@@ -177,9 +182,8 @@ class Well3:
         except Exception as e:
             raise Exception(f'Failed to sign in with verify link: {str(e)}')
 
-    @classmethod
-    def _extract_state_and_oauth_verifier(cls, content):
-        link_part = content.split('href="https://auth.well3.com/__/auth/handler?state=')[1]
+    def _extract_state_and_oauth_verifier(self, content):
+        link_part = content.split(f'href="{self.AUTH_API_URL}?state=')[1]
         state = link_part.split('&amp;')[0]
         oauth_verifier = link_part.split('oauth_verifier=')[1]
         oauth_verifier = oauth_verifier.split('">')[0]

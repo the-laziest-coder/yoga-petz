@@ -34,6 +34,7 @@ class Account:
         self.private_key = None
 
     async def refresh_profile(self):
+        await self.well3.generate_codes()
         self.profile = await self.well3.me()
         self.account.invite_codes = [rc['code'] for rc in self.profile['referralInfo']['myReferralCodes']
                                      if 'usedAt' not in rc]
@@ -55,15 +56,7 @@ class Account:
         if task_info['value'] == 0:
             self.account.next_breathe_time = 'Not started'
             return
-
-        diff = task_info['nextAvailableFrom'] - int(time.time() * 1000)
-        diff //= 1000
-
-        self.account.next_breathe_time = 'in ' + str(timedelta(seconds=diff))
-
-    async def check_invite_codes(self):
-        await self.well3.generate_codes()
-        await self.refresh_profile()
+        self.account.next_breathe_time = task_info['nextAvailableFrom']
 
     async def do_quests(self):
         await self.do_quests_batch('dailyProgress')
@@ -144,10 +137,7 @@ class Account:
                     logger.warning(f'{self.idx}) Changing profile name is not supported yet')
                     return False
                 case 'twitter-check-profile-banner':
-                    if FAKE_TWITTER:
-                        return True
-                    logger.warning(f'{self.idx}) Changing banner is not supported yet')
-                    return False
+                    return True
                 case unknown_action:
                     suffix = '. Trying to verify anyway' if FAKE_TWITTER else ''
                     logger.warning(f'{self.idx}) Unknown special action {unknown_action}{suffix}')
