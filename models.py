@@ -45,7 +45,7 @@ class AccountInfo:
                f'\tInsights to open: {self.insights_to_open}\n' \
                f'\tDaily insight: {self.daily_insight.capitalize()}\n' \
                f'\tInsights:\n{insights_str}\n' \
-               f'\tInvite codes: {invites_str}'
+               f'\tInvite codes: {invites_str}\n'
 
 
 @dataclass

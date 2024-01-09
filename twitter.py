@@ -5,6 +5,8 @@ import binascii
 import ua_generator
 import aiohttp
 
+from aiohttp_socks import ProxyConnector
+
 from models import AccountInfo
 from utils import is_empty, handle_response, async_retry
 from config import DISABLE_SSL
@@ -61,7 +63,7 @@ class Twitter:
         self.headers.update({'x-csrf-token': ct0})
 
     def get_conn(self):
-        return None
+        return ProxyConnector.from_url(self.proxy) if self.proxy else None
 
     def set_cookies(self, resp_cookies):
         self.cookies.update({name: value.value for name, value in resp_cookies.items()})
@@ -78,11 +80,11 @@ class Twitter:
             kwargs.update({'ssl': False})
         async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers, cookies=cookies) as sess:
             if method.lower() == 'get':
-                async with sess.get(url, proxy=self.proxy, **kwargs) as resp:
+                async with sess.get(url, **kwargs) as resp:
                     self.set_cookies(resp.cookies)
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             elif method.lower() == 'post':
-                async with sess.post(url, proxy=self.proxy, **kwargs) as resp:
+                async with sess.post(url, **kwargs) as resp:
                     self.set_cookies(resp.cookies)
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             else:
@@ -93,8 +95,7 @@ class Twitter:
             kwargs = {'ssl': False} if DISABLE_SSL else {}
             async with aiohttp.ClientSession(connector=self.get_conn(),
                                              headers=self.headers, cookies=self.cookies) as sess:
-                async with sess.get('https://twitter.com/i/api/1.1/dm/user_updates.json?',
-                                    proxy=self.proxy, **kwargs) as resp:
+                async with sess.get('https://twitter.com/i/api/1.1/dm/user_updates.json?', **kwargs) as resp:
                     new_csrf = resp.cookies.get("ct0")
                     if new_csrf is None:
                         raise Exception('Empty new csrf')

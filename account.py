@@ -1,6 +1,8 @@
 import random
 import asyncio
 import time
+import colorama
+from termcolor import colored
 from loguru import logger
 from datetime import timedelta
 from typing import Union
@@ -14,8 +16,11 @@ from twitter import Twitter
 from models import AccountInfo
 from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
-    INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN
+    INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC
 from utils import wait_a_bit, get_w3, to_bytes, async_retry
+
+
+colorama.init()
 
 
 class Account:
@@ -58,13 +63,17 @@ class Account:
             return
         self.account.next_breathe_time = task_info['nextAvailableFrom']
 
-    async def do_quests(self):
-        await self.do_quests_batch('dailyProgress')
-        await self.do_quests_batch('specialProgress')
+    async def do_quests(self) -> int:
+        done = await self.do_quests_batch('dailyProgress')
+        done += await self.do_quests_batch('specialProgress')
+        return done
 
-    async def do_quests_batch(self, batch_name: str):
+    async def do_quests_batch(self, batch_name: str) -> int:
         logger.info(f'{self.idx}) Starting {batch_name} tasks...')
+        cnt = 0
         for task_id, task_info in self.quests[batch_name].items():
+            if task_info['expClaimed']:
+                continue
             task_title = task_info['title']
             if '</a>' in task_title:
                 a_end = task_title.find('</a>')
@@ -73,8 +82,6 @@ class Account:
                 a_start_close = task_title[a_start_open:].find('">') + a_start_open
                 task_title = task_title[:a_start_open] + task_title[a_start_close + 2:]
             title = f"{task_title} [Exp: {task_info['exp']}]"
-            if task_info['expClaimed']:
-                continue
             if task_id in self.pending_quests:
                 logger.info(f'{self.idx}) {title} in pending verify')
                 continue
@@ -83,7 +90,9 @@ class Account:
             if done:
                 await self.well3.claim_exp(task_id)
                 logger.success(f'{self.idx}) Claimed exp or started verification')
-            await wait_a_bit(random.uniform(3, 5))
+                cnt += 1
+                await wait_a_bit(random.uniform(3, 5))
+        return cnt
 
     async def do_task(self, task_info: dict):
         if task_info.get('condition') == BREATHE_SESSION_CONDITION:
@@ -203,6 +212,31 @@ class Account:
                         logger.success(f'{self.idx}) {action} - Successful tx: {tx_link}')
                     else:
                         logger.error(f'{self.idx}) {action} - Failed tx: {tx_link}')
+                    try:
+                        if logs := tx_data.get('logs'):
+                            for log in logs:
+                                topics = log.get('topics')
+                                if topics is None:
+                                    continue
+                                if topics[0].hex() != LOG_RESULT_TOPIC:
+                                    continue
+                                data = log.get('data')
+                                if data is None:
+                                    continue
+                                data = data.hex()[2:]
+                                values = [int(data[i:i+64], 16) for i in range(0, len(data), 64)]
+                                pretty_str = []
+                                for idx, val in enumerate(values[2:]):
+                                    if val == 0:
+                                        continue
+                                    name, color = LOG_DATA_NAME_AND_COLOR[idx]
+                                    pretty_str.append(colored(f'{val} {name}', color, attrs=['bold']))
+                                pretty_str = ', '.join(pretty_str)
+                                print()
+                                logger.info(f'{self.idx}) Received: {pretty_str}')
+                                print()
+                    except:
+                        pass
                     return
             except TransactionNotFound:
                 pass
@@ -220,15 +254,16 @@ class Account:
         self.account.daily_insight = 'claimed' if used else 'available'
         return self.account.daily_insight
 
-    async def claim_daily_insight(self):
+    async def claim_daily_insight(self) -> int:
         logger.info(f'{self.idx}) Daily insight status: {await self.check_daily_insight()}')
         if self.account.daily_insight != 'available':
-            return
+            return 0
         daily_quest = self.profile['contractInfo']['dailyQuest']
         nonce = daily_quest['nonce']
         signature = to_bytes(daily_quest['signature'])
         tx_hash = await self.build_and_send_tx(self.insights_contract.functions.nonceQuest(nonce, signature))
         await self.tx_verification(tx_hash, 'Claim daily insight')
+        return 1
 
     @async_retry
     async def check_rank_insights(self):
@@ -238,10 +273,10 @@ class Account:
         self.account.insights_to_open = cnt
         return self.account.insights_to_open
 
-    async def claim_rank_insights(self):
+    async def claim_rank_insights(self) -> int:
         logger.info(f'{self.idx}) Rank insights available to open: {await self.check_rank_insights()}')
         if self.account.insights_to_open < MIN_INSIGHTS_TO_OPEN:
-            return
+            return 0
         rank_quest = self.profile['contractInfo']['rankupQuest']
         current_rank = rank_quest['currentRank']
         signature = to_bytes(rank_quest['signature'])
@@ -249,6 +284,7 @@ class Account:
                                                rankupQuestAmount(current_rank, signature,
                                                                  self.account.insights_to_open))
         await self.tx_verification(tx_hash, 'Claim rank insight')
+        return 1
 
     @async_retry
     async def check_results(self):

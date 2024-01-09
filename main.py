@@ -15,7 +15,7 @@ from models import AccountInfo, ProcessResult
 from twitter import Twitter
 from well3 import Well3
 from account import Account
-from config import DO_TASKS, CHECK_INSIGHTS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
+from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
     SKIP_FIRST_ACCOUNTS, MOBILE_PROXY
 from utils import wait_a_bit, async_retry
@@ -49,24 +49,36 @@ class InvitesHandler:
 
                 if type(AUTO_UPDATE_INVITES_FROM_FIRST_COUNT) is tuple:
                     from_addresses = list(enumerate(self.addresses[:AUTO_UPDATE_INVITES_FROM_FIRST_COUNT[1]], start=1))
-                    from_addresses = random.sample(from_addresses, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT[0])
+                    random.shuffle(from_addresses)
+                    max_use = AUTO_UPDATE_INVITES_FROM_FIRST_COUNT[0]
                 else:
                     from_addresses = list(enumerate(self.addresses[:AUTO_UPDATE_INVITES_FROM_FIRST_COUNT], start=1))
+                    max_use = None
+
+                print()
+                logger.info('Updating invites')
+
                 for idx, address in from_addresses:
-                    if idx != 1:
+                    if max_use is not None and max_use <= 0:
+                        break
+
+                    if MOBILE_PROXY and idx != 1:
                         await asyncio.sleep(random.uniform(WAIT_BETWEEN_ACCOUNTS[0], WAIT_BETWEEN_ACCOUNTS[1]))
 
                     account_info = await refresh(f'Updating invites {idx}', address, self.storage)
                     if account_info is None:
-                        break
+                        continue
 
                     logger.info(f'Updating invites {idx}) Added new {len(account_info.invite_codes)}')
                     self.invites.extend(account_info.invite_codes)
 
+                    if len(account_info.invite_codes) > 0 and max_use is not None:
+                        max_use -= 1
+
                 if type(AUTO_UPDATE_INVITES_FROM_FIRST_COUNT) is tuple:
                     random.shuffle(self.invites)
 
-                logger.success(f'Invites updated: {len(self.invites)} new')
+                logger.success(f'Invites updated: {len(self.invites)} new\n')
 
         except Exception as e:
             raise Exception(f'Update invites failed: {str(e)}')
@@ -80,7 +92,7 @@ async def change_ip(link: str):
                 raise Exception(f'Failed to change ip: Status = {resp.status}. Response = {await resp.text()}')
 
 
-async def refresh(prefix: str, address: str, storage: Storage):
+async def refresh(prefix: str, address: str, storage: Storage, check_insights: bool = False):
     logger.info(f'{prefix}) {address}')
     account_info = await storage.get_account_info(address)
     if account_info is None:
@@ -91,11 +103,13 @@ async def refresh(prefix: str, address: str, storage: Storage):
         logger.info(f'{prefix}) Successfully changed ip')
     twitter = Twitter(account_info)
     await twitter.start()
-    well3 = Well3(f'{prefix}', account_info, twitter)
+    well3 = Well3(prefix, account_info, twitter)
     if await well3.sign_in_or_start_register_if_needed():
         return None
-    account = Account(f'{prefix}', account_info, well3, twitter)
+    account = Account(prefix, account_info, well3, twitter)
     await account.refresh_profile()
+    if check_insights:
+        await account.check_insights()
     await storage.set_account_info(address, account_info)
     return account_info
 
@@ -103,7 +117,7 @@ async def refresh(prefix: str, address: str, storage: Storage):
 async def refresh_account(account_data: Tuple[int, Tuple[str, str, str]], storage: Storage, _):
     idx, (wallet, proxy, twitter_token) = account_data
     address = EthAccount().from_key(wallet).address
-    await refresh(f'Refreshing account {idx}', address, storage)
+    await refresh(f'Refreshing account {idx}', address, storage, check_insights=True)
     return ProcessResult()
 
 
@@ -163,30 +177,28 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
     logger.info(f'{idx}) Profile refreshed')
 
     if DO_TASKS:
-        await account.do_quests()
-        await account.refresh_profile()
+        if await account.do_quests() > 0:
+            await account.refresh_profile()
 
-    if CHECK_INSIGHTS or CLAIM_DAILY_INSIGHT or CLAIM_RANK_INSIGHTS:
+    if CLAIM_DAILY_INSIGHT or CLAIM_RANK_INSIGHTS:
         await account.link_wallet_if_needed(wallet)
 
+    claimed = 0
     try:
         if CLAIM_DAILY_INSIGHT:
             await wait_a_bit(5)
-            logger.info(f'{idx}) Starting claim daily insight')
-            await account.claim_daily_insight()
+            claimed += await account.claim_daily_insight()
         if CLAIM_RANK_INSIGHTS:
             await wait_a_bit(5)
-            logger.info(f'{idx}) Starting claim rank insights')
-            await account.claim_rank_insights()
+            claimed += await account.claim_rank_insights()
     except Exception as e:
         logger.error(f'{idx}) Claim error: {str(e)}')
 
-    if CLAIM_DAILY_INSIGHT or CLAIM_RANK_INSIGHTS:
+    if claimed > 0:
         await account.refresh_profile()
 
-    if CHECK_INSIGHTS:
-        logger.info(f'{idx}) Checking insights')
-        await account.check_insights()
+    logger.info(f'{idx}) Checking insights')
+    await account.check_insights()
 
     logger.info(f'{idx}) Account stats:\n{account_info.str_stats()}')
 
@@ -236,7 +248,7 @@ def main():
     with open('files/proxies.txt', 'r', encoding='utf-8') as file:
         proxies = file.read().splitlines()
         proxies = [p.strip() for p in proxies]
-        proxies = [p if '://' in p else 'http://' + p for p in proxies]
+        proxies = [p if '://' in p.split('|')[0] else 'http://' + p for p in proxies]
     with open('files/twitters.txt', 'r', encoding='utf-8') as file:
         twitters = file.read().splitlines()
         twitters = [t.strip() for t in twitters]
@@ -259,10 +271,14 @@ def main():
 
     invites_handler = InvitesHandler(invites, storage, addresses)
 
+    want_only = []
+
     def get_batches(skip: int = None):
         _data = list(enumerate(list(zip(wallets, proxies, twitters)), start=1))
         if skip is not None:
             _data = _data[skip:]
+        if skip is not None and len(want_only) > 0:
+            _data = [d for d in enumerate(list(zip(wallets, proxies, twitters)), start=1) if d[0] in want_only]
         _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(THREADS_NUM)]
         for _idx, d in enumerate(_data):
             _batches[_idx % THREADS_NUM].append(d)
@@ -301,6 +317,7 @@ def main():
         'daily_available': 0,
         'to_open': 0,
         'pending': 0,
+        'breathe': 0,
     }
     all_invite_codes = []
     for idx, w in enumerate(wallets, start=1):
@@ -327,6 +344,8 @@ def main():
             total['daily_claimed'] += 1
         total['to_open'] += account.insights_to_open
         total['pending'] += account.pending_quests
+        if account.next_breathe_str() == 'Completed':
+            total['breathe'] += 1
 
         csv_data.append([idx, address, acc_total,
                          account.insights.get('uncommon'), account.insights.get('rare'),
@@ -339,9 +358,9 @@ def main():
                           total['uncommon'], total['rare'],
                           total['legendary'], total['mythical'],
                           f'{total["daily_available"]}/{total["daily_claimed"]}',
-                          total['to_open'], total['pending']]])
+                          total['to_open'], total['pending'], total['breathe']]])
     csv_data.append(['', '', '', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
-                     'Daily insight', 'Insights to open', 'Pending quests'])
+                     'Daily insight', 'Insights to open', 'Pending quests', 'Next breathe'])
 
     run_timestamp = str(datetime.now())
     csv_data.extend([[], ['', 'Timestamp', run_timestamp]])

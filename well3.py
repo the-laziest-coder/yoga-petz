@@ -3,6 +3,7 @@ import ua_generator
 import time
 
 from typing import Union
+from aiohttp_socks import ProxyConnector
 
 from models import AccountInfo
 from twitter import Twitter
@@ -63,7 +64,7 @@ class Well3:
         self.proxy = None if is_empty(self.proxy) else self.proxy
 
     def get_conn(self):
-        return None
+        return ProxyConnector.from_url(self.proxy) if self.proxy else None
 
     @async_retry
     async def request(self, method, url, acceptable_statuses=None, resp_handler=None, with_text=False, **kwargs):
@@ -74,10 +75,10 @@ class Well3:
             kwargs.update({'ssl': False})
         async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers) as sess:
             if method.lower() == 'get':
-                async with sess.get(url, proxy=self.proxy, **kwargs) as resp:
+                async with sess.get(url, **kwargs) as resp:
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             elif method.lower() == 'post':
-                async with sess.post(url, proxy=self.proxy, **kwargs) as resp:
+                async with sess.post(url, **kwargs) as resp:
                     return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
             else:
                 raise Exception('Wrong request method')
@@ -160,7 +161,7 @@ class Well3:
                     with_text=True
                 )
             except Exception as e:
-                reason = 'This account is suspended: ' if 'This account is suspended' in str(e) else ''
+                reason = 'This account is suspended\n' if 'This account is suspended' in str(e) else ''
                 raise Exception(f'Failed to get twitter oauth verifier: {reason}{str(e)}')
 
         verify_link = f'{self.AUTH_API_URL}?state={state}&oauth_token={oauth_token}&oauth_verifier={oauth_verifier}'
