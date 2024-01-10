@@ -180,8 +180,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
         if await account.do_quests() > 0:
             await account.refresh_profile()
 
-    if CLAIM_DAILY_INSIGHT or CLAIM_RANK_INSIGHTS:
-        await account.link_wallet_if_needed(wallet)
+    await account.link_wallet_if_needed(wallet)
 
     claimed = 0
     try:
