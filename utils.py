@@ -2,6 +2,7 @@ import random
 import asyncio
 from retry import retry
 from web3 import AsyncWeb3
+from async_web3 import AsyncHTTPProviderWithProxy
 from config import RPC, MAX_TRIES
 from aiohttp import ClientResponse
 
@@ -22,10 +23,8 @@ async def wait_a_bit(x=1):
 def get_w3(proxy: str = None):
     if proxy and '|' in proxy:
         proxy = proxy.split('|')[0]
-    req_args = {} if is_empty(proxy) else {
-        'proxy': proxy,
-    }
-    return AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(RPC, request_kwargs=req_args))
+    proxy = None if is_empty(proxy) else proxy
+    return AsyncWeb3(AsyncHTTPProviderWithProxy(RPC, proxy))
 
 
 def to_bytes(hex_str):
