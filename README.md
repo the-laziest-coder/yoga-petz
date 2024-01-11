@@ -5,6 +5,7 @@
  - Claim exp
  - Claim insights
  - Accounts statistics
+ - Twitter accounts checker
 
 ### Follow: https://t.me/thelaziestcoder
 
@@ -31,6 +32,9 @@ Installing all dependencies: \
 
 Run main script: \
 `python main.py`
+
+Run twitter checker: \
+`python3 checker.py`
 
 ### Results
 
