@@ -24,6 +24,10 @@ class Storage:
             return None
         return deepcopy(info)
 
+    def remove(self, address: str):
+        if address in self.data:
+            self.data.pop(address)
+
     async def get_account_info(self, address: str) -> Optional[AccountInfo]:
         async with self.lock:
             return self.get_final_account_info(address)
