@@ -50,7 +50,7 @@ async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
             await async_func(d)
         except Exception as e:
             e_msg = str(e)
-            if 'This account is suspended' in e_msg or 'Your account has been locked' in e_msg:
+            if 'account is suspended' in e_msg or 'account has been locked' in e_msg:
                 failed.append(d)
             if e_msg == '':
                 e_msg = ' '
