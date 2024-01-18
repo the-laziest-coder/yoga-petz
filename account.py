@@ -191,9 +191,13 @@ class Account:
         tx = await func.build_transaction({
             'from': self.account.address,
             'nonce': await self.w3.eth.get_transaction_count(self.account.address),
-            'gas': 300000,
             'gasPrice': 10008,
         })
+        try:
+            _ = await self.w3.eth.estimate_gas(tx)
+        except Exception as e:
+            raise Exception(f'Tx simulation failed: {str(e)}')
+        tx['gas'] = 300000
 
         signed_tx = self.w3.eth.account.sign_transaction(tx, self.private_key)
         tx_hash = await self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
