@@ -41,6 +41,12 @@ class Account:
     async def close(self):
         await close_w3(self.w3)
 
+    async def __aenter__(self) -> "Account":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.close()
+
     async def refresh_profile(self):
         await self.well3.generate_codes()
         self.profile = await self.well3.me()

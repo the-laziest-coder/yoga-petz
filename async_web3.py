@@ -40,8 +40,7 @@ _async_session_pool = ThreadPoolExecutor(max_workers=1)
 
 async def close_all_sessions():
     for _, sess in _async_session_cache.items():
-        if not sess.closed:
-            await sess.close()
+        await sess.close()
 
 
 async def async_cache_and_return_session_with_proxy(

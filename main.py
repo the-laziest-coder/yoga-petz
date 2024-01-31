@@ -107,11 +107,10 @@ async def refresh(prefix: str, address: str, storage: Storage, check_insights: b
     well3 = Well3(prefix, account_info, twitter)
     if await well3.sign_in_or_start_register_if_needed():
         return None
-    account = Account(prefix, account_info, well3, twitter)
-    await account.refresh_profile()
-    if check_insights:
-        await account.check_insights()
-    await account.close()
+    async with Account(prefix, account_info, well3, twitter) as account:
+        await account.refresh_profile()
+        if check_insights:
+            await account.check_insights()
     await storage.set_account_info(address, account_info)
     return account_info
 
@@ -176,36 +175,35 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
     logger.info(f'{idx}) Signed in')
 
-    account = Account(idx, account_info, well3, twitter)
-    await account.refresh_profile()
+    async with Account(idx, account_info, well3, twitter) as account:
 
-    logger.info(f'{idx}) Profile refreshed')
-
-    if DO_TASKS:
-        if await account.do_quests() > 0:
-            await account.refresh_profile()
-
-    await account.link_wallet_if_needed(wallet)
-
-    claimed = 0
-    try:
-        if CLAIM_DAILY_INSIGHT:
-            await wait_a_bit(5)
-            claimed += await account.claim_daily_insight()
-        if CLAIM_RANK_INSIGHTS:
-            await wait_a_bit(5)
-            claimed += await account.claim_rank_insights()
-    except Exception as e:
-        logger.error(f'{idx}) Claim error: {str(e)}. '
-                     f'Linked wallet: {account.profile["contractInfo"].get("linkedAddress")}')
-
-    if claimed > 0:
         await account.refresh_profile()
 
-    logger.info(f'{idx}) Checking insights')
-    await account.check_insights()
+        logger.info(f'{idx}) Profile refreshed')
 
-    await account.close()
+        if DO_TASKS:
+            if await account.do_quests() > 0:
+                await account.refresh_profile()
+
+        await account.link_wallet_if_needed(wallet)
+
+        claimed = 0
+        try:
+            if CLAIM_DAILY_INSIGHT:
+                await wait_a_bit(5)
+                claimed += await account.claim_daily_insight()
+            if CLAIM_RANK_INSIGHTS:
+                await wait_a_bit(5)
+                claimed += await account.claim_rank_insights()
+        except Exception as e:
+            logger.error(f'{idx}) Claim error: {str(e)}. '
+                         f'Linked wallet: {account.profile["contractInfo"].get("linkedAddress")}')
+
+        if claimed > 0:
+            await account.refresh_profile()
+
+        logger.info(f'{idx}) Checking insights')
+        await account.check_insights()
 
     logger.info(f'{idx}) Account stats:\n{account_info.str_stats()}')
 
