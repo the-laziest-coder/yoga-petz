@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Tuple, List, Optional
 from eth_account import Account as EthAccount
 
+from async_web3 import close_all_sessions
 from storage import Storage
 from models import AccountInfo, ProcessResult
 from twitter import Twitter
@@ -17,7 +18,7 @@ from well3 import Well3
 from account import Account
 from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
-    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY
+    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO
 from utils import wait_a_bit, async_retry
 
 
@@ -110,6 +111,7 @@ async def refresh(prefix: str, address: str, storage: Storage, check_insights: b
     await account.refresh_profile()
     if check_insights:
         await account.check_insights()
+    await account.close()
     await storage.set_account_info(address, account_info)
     return account_info
 
@@ -134,6 +136,9 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
         logger.info(f'{idx}) Account info was not saved before')
         account_info = AccountInfo(address=address, proxy=proxy, twitter_auth_token=twitter_token)
     else:
+        if UPDATE_STORAGE_ACCOUNT_INFO:
+            account_info.proxy = proxy
+            account_info.twitter_auth_token = twitter_token
         logger.info(f'{idx}) Saved account info restored')
 
     if '|' in account_info.proxy:
@@ -191,7 +196,8 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
             await wait_a_bit(5)
             claimed += await account.claim_rank_insights()
     except Exception as e:
-        logger.error(f'{idx}) Claim error: {str(e)}')
+        logger.error(f'{idx}) Claim error: {str(e)}. '
+                     f'Linked wallet: {account.profile["contractInfo"].get("linkedAddress")}')
 
     if claimed > 0:
         await account.refresh_profile()
@@ -199,18 +205,22 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
     logger.info(f'{idx}) Checking insights')
     await account.check_insights()
 
+    await account.close()
+
     logger.info(f'{idx}) Account stats:\n{account_info.str_stats()}')
 
     await storage.set_account_info(address, account_info)
+
+    await storage.async_save()
 
     return result
 
 
 async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
                         storage: Storage, invites: InvitesHandler,
-                        async_func, sleep) -> int:
+                        async_func, sleep):
     await asyncio.sleep(WAIT_BETWEEN_ACCOUNTS[0] / THREADS_NUM * bid)
-    used_invites = 0
+    failed, used_invites = [], 0
     for idx, d in enumerate(batch):
         if sleep and idx != 0:
             await asyncio.sleep(random.uniform(WAIT_BETWEEN_ACCOUNTS[0], WAIT_BETWEEN_ACCOUNTS[1]))
@@ -219,6 +229,7 @@ async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
             if result.invite_used:
                 used_invites += 1
         except Exception as e:
+            failed.append(d)
             e_msg = str(e)
             if e_msg == '':
                 e_msg = ' '
@@ -229,7 +240,7 @@ async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
                     await file.write(f'{str(datetime.now())} | {d[0]}) Process account error: {e_msg}')
                     await file.flush()
 
-    return used_invites
+    return failed, used_invites
 
 
 async def process(batches: List[List[Tuple[int, Tuple[str, str, str]]]], storage: Storage, invites: InvitesHandler,
@@ -266,21 +277,28 @@ def main():
     storage = Storage('storage/data.json')
     storage.init()
 
-    addresses = [EthAccount().from_key(w).address for w in wallets]
+    addresses = []
+    for idx, w in enumerate(wallets, start=1):
+        try:
+            addresses.append(EthAccount().from_key(w).address)
+        except Exception as e:
+            raise Exception(f'Wrong private key #{idx}: {str(e)}')
 
     invites_handler = InvitesHandler(invites, storage, addresses)
 
     want_only = []
 
-    def get_batches(skip: int = None):
+    def get_batches(skip: int = None, threads: int = THREADS_NUM):
         _data = list(enumerate(list(zip(wallets, proxies, twitters)), start=1))
         if skip is not None:
             _data = _data[skip:]
         if skip is not None and len(want_only) > 0:
             _data = [d for d in enumerate(list(zip(wallets, proxies, twitters)), start=1) if d[0] in want_only]
-        _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(THREADS_NUM)]
+        if RANDOM_ORDER:
+            random.shuffle(_data)
+        _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(threads)]
         for _idx, d in enumerate(_data):
-            _batches[_idx % THREADS_NUM].append(d)
+            _batches[_idx % threads].append(d)
         return _batches
 
     loop = asyncio.new_event_loop()
@@ -290,18 +308,31 @@ def main():
         storage, invites_handler, process_account
     ))
 
-    used_invites = sum(results)
+    failed = [r[0] for r in results]
+    failed = [f[0] for fs in failed for f in fs]
+    used_invites = [r[1] for r in results]
+
+    used_invites = sum(used_invites)
 
     storage.save()
 
     print()
-    logger.info('Finished. Refreshing accounts profiles')
-
-    loop.run_until_complete(process(get_batches(), storage, invites_handler, refresh_account, sleep=MOBILE_PROXY))
-
-    storage.save()
-
+    logger.info('Finished')
+    logger.info(f'Failed ids: {failed}')
     print()
+
+    if len(want_only) == 0:
+        logger.info('Refreshing accounts profiles')
+        loop.run_until_complete(process(
+            get_batches(), storage, invites_handler,
+            refresh_account,
+            sleep=MOBILE_PROXY)
+        )
+        storage.save()
+        print()
+
+    loop.run_until_complete(close_all_sessions())
+
     logger.info(f'Used invites: {used_invites}')
 
     csv_data = [['#', 'Address', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
@@ -329,17 +360,17 @@ def main():
 
         all_invite_codes.extend(account.invite_codes)
 
-        acc_total = account.insights.get('uncommon', 0) + account.insights.get('rare', 0) \
-                    + account.insights.get('legendary', 0) + account.insights.get('mythical', 0)
+        acc_total = account.insights.get('uncommon', 0) + account.insights.get('rare', 0) + \
+            account.insights.get('legendary', 0) + account.insights.get('mythical', 0)
 
         total['total'] += acc_total
         total['uncommon'] += account.insights.get('uncommon', 0)
         total['rare'] += account.insights.get('rare', 0)
         total['legendary'] += account.insights.get('legendary', 0)
         total['mythical'] += account.insights.get('mythical', 0)
-        if account.daily_insight == 'available':
+        if account.daily_insight.endswith('available'):
             total['daily_available'] += 1
-        elif account.daily_insight == 'claimed':
+        elif account.daily_insight.endswith('claimed'):
             total['daily_claimed'] += 1
         total['to_open'] += account.insights_to_open
         total['pending'] += account.pending_quests

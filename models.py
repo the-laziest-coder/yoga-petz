@@ -1,4 +1,5 @@
 import time
+from termcolor import colored
 from datetime import timedelta
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json
@@ -14,6 +15,7 @@ class AccountInfo:
     well3_auth_token: str = ''
     well3_auth_token_expire_at: int = 0
     well3_refresh_token: str = ''
+    cf_clearance: str = ''
     user_agent: str = ''
     sec_ch_ua: str = ''
     sec_ch_ua_platform: str = ''
@@ -43,9 +45,16 @@ class AccountInfo:
                f'\tPending quests: {self.pending_quests}\n' \
                f'\tNext breathe: {self.next_breathe_str()}\n' \
                f'\tInsights to open: {self.insights_to_open}\n' \
-               f'\tDaily insight: {self.daily_insight.capitalize()}\n' \
+               f'\tDaily insight: {self.daily_insight_colored}\n' \
                f'\tInsights:\n{insights_str}\n' \
                f'\tInvite codes: {invites_str}\n'
+
+    @property
+    def daily_insight_colored(self):
+        daily_insight = self.daily_insight
+        if 'SUPER' in daily_insight:
+            return colored('SUPER ', 'light_yellow') + ' '.join(daily_insight.split(' ')[1:])
+        return daily_insight
 
 
 @dataclass

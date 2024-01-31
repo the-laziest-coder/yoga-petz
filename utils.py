@@ -2,6 +2,7 @@ import random
 import asyncio
 from retry import retry
 from web3 import AsyncWeb3
+from typing import cast
 from async_web3 import AsyncHTTPProviderWithProxy
 from config import RPC, MAX_TRIES
 from aiohttp import ClientResponse
@@ -31,7 +32,27 @@ def to_bytes(hex_str):
     return AsyncWeb3.to_bytes(hexstr=hex_str)
 
 
-async def handle_response(resp_raw: ClientResponse, acceptable_statuses=None, resp_handler=None, with_text=False):
+async def close_w3(w3: AsyncWeb3):
+    if isinstance(w3.manager.provider, AsyncHTTPProviderWithProxy):
+        await cast(AsyncHTTPProviderWithProxy, w3.manager.provider).close()
+
+
+async def handle_response(resp_raw, acceptable_statuses=None, resp_handler=None, with_text=False):
+    if acceptable_statuses and len(acceptable_statuses) > 0:
+        if resp_raw.status_code not in acceptable_statuses:
+            raise Exception(f'Bad status code [{resp_raw.status_code}]: Response = {resp_raw.text}')
+    try:
+        if resp_handler is not None:
+            if with_text:
+                return resp_handler(resp_raw.text)
+            else:
+                return resp_handler(resp_raw.json())
+        return
+    except Exception as e:
+        raise Exception(f'{str(e)}: Status = {resp_raw.status_code}. Response = {resp_raw.text}')
+
+
+async def handle_aio_response(resp_raw: ClientResponse, acceptable_statuses=None, resp_handler=None, with_text=False):
     if acceptable_statuses and len(acceptable_statuses) > 0:
         if resp_raw.status not in acceptable_statuses:
             raise Exception(f'Bad status code [{resp_raw.status}]: Response = {await resp_raw.text()}')

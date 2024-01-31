@@ -1,23 +1,22 @@
 import aiohttp
-import ua_generator
 import time
 
 from typing import Union
+from loguru import logger
 from aiohttp_socks import ProxyConnector
 
 from models import AccountInfo
 from twitter import Twitter
-from utils import is_empty, handle_response, async_retry
-from vars import SITE_API_KEY
+from utils import is_empty, handle_aio_response, async_retry
+from vars import SITE_API_KEY, USER_AGENT, SEC_CH_UA, SEC_CH_UA_PLATFORM
 from config import DISABLE_SSL
 
 
 def _get_headers(info: AccountInfo) -> dict:
     if is_empty(info.user_agent):
-        ua = ua_generator.generate(device='desktop', browser='chrome')
-        info.user_agent = ua.text
-        info.sec_ch_ua = f'"{ua.ch.brands[2:]}"'
-        info.sec_ch_ua_platform = f'"{ua.platform.title()}"'
+        info.user_agent = USER_AGENT
+        info.sec_ch_ua = SEC_CH_UA
+        info.sec_ch_ua_platform = SEC_CH_UA_PLATFORM
     return {
         'accept': '*/*',
         'accept-encoding': 'gzip, deflate, br',
@@ -66,6 +65,19 @@ class Well3:
     def get_conn(self):
         return ProxyConnector.from_url(self.proxy) if self.proxy else None
 
+    async def _request(self, method, url, headers,
+                       acceptable_statuses=None, resp_handler=None, with_text=False, **kwargs):
+        cookies = None if is_empty(self.account.cf_clearance) else {'cf_clearance': self.account.cf_clearance}
+        async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers) as sess:
+            if method.lower() == 'get':
+                async with sess.get(url, **kwargs) as resp:
+                    return await handle_aio_response(resp, acceptable_statuses, resp_handler, with_text)
+            elif method.lower() == 'post':
+                async with sess.post(url, **kwargs) as resp:
+                    return await handle_aio_response(resp, acceptable_statuses, resp_handler, with_text)
+            else:
+                raise Exception('Wrong request method')
+
     @async_retry
     async def request(self, method, url, acceptable_statuses=None, resp_handler=None, with_text=False, **kwargs):
         headers = self.headers.copy()
@@ -73,15 +85,7 @@ class Well3:
             headers.update(kwargs.pop('headers'))
         if DISABLE_SSL:
             kwargs.update({'ssl': False})
-        async with aiohttp.ClientSession(connector=self.get_conn(), headers=headers) as sess:
-            if method.lower() == 'get':
-                async with sess.get(url, **kwargs) as resp:
-                    return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
-            elif method.lower() == 'post':
-                async with sess.post(url, **kwargs) as resp:
-                    return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
-            else:
-                raise Exception('Wrong request method')
+        return await self._request(method, url, headers, acceptable_statuses, resp_handler, with_text, **kwargs)
 
     @async_retry
     async def sign_in_or_start_register_if_needed(self):
@@ -117,11 +121,7 @@ class Well3:
                     'customParameter': {},
                     'providerId': 'twitter.com',
                 },
-                headers={
-                    'origin': 'https://well3.com',
-                    'referer': f'https://well3.com/',
-                    **self.GOOGLE_CREATE_AUTH_HEADERS,
-                },
+                headers=self.GOOGLE_CREATE_AUTH_HEADERS,
                 acceptable_statuses=[200],
                 resp_handler=_create_auth_handle
             )
@@ -211,12 +211,12 @@ class Well3:
                                headers=self.GOOGLE_SIGN_IN_HEADERS, acceptable_statuses=[200], resp_handler=_handler)
 
         except Exception as e:
-            raise Exception(f'Failed to get account profile: {str(e)}')
+            raise Exception(f'Failed to refresh token: {str(e)}')
 
     async def me(self):
         try:
             return await self.request('GET', f'{self.API_URL}/ygpz/me', acceptable_statuses=[200],
-                                      resp_handler=lambda r: r)
+                                      resp_handler=lambda r: r, headers={'accept': 'application/json'})
         except Exception as e:
             raise Exception(f'Failed to get account profile: {str(e)}')
 

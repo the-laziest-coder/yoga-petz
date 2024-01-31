@@ -1,8 +1,7 @@
 import logging
 import os
 import threading
-import asyncio
-from typing import Any, List, Dict, Iterable, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Optional, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor
 
 from aiohttp import ClientSession, ClientResponse, ClientTimeout
@@ -19,6 +18,8 @@ from web3._utils.async_caching import async_lock
 from web3._utils.caching import generate_cache_key
 from web3._utils.request import _async_close_evicted_sessions
 
+from vars import USER_AGENT
+
 
 logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 10
@@ -29,17 +30,18 @@ def get_default_http_endpoint() -> URI:
 
 
 def construct_user_agent(class_name: str) -> str:
-    from web3 import (
-        __version__ as web3_version,
-    )
-
-    user_agent = f"web3.py/{web3_version}/{class_name}"
-    return user_agent
+    return USER_AGENT
 
 
 _async_session_cache = SimpleCache()
 _async_session_cache_lock = threading.Lock()
 _async_session_pool = ThreadPoolExecutor(max_workers=1)
+
+
+async def close_all_sessions():
+    for _, sess in _async_session_cache.items():
+        if not sess.closed:
+            await sess.close()
 
 
 async def async_cache_and_return_session_with_proxy(
@@ -48,7 +50,7 @@ async def async_cache_and_return_session_with_proxy(
     session: Optional[ClientSession] = None,
 ) -> ClientSession:
     # cache key should have a unique thread identifier
-    cache_key = generate_cache_key(f"{threading.get_ident()}:{endpoint_uri}")
+    cache_key = generate_cache_key(f"{threading.get_ident()}:{endpoint_uri}:{proxy if proxy else ''}")
 
     evicted_items = None
     async with async_lock(_async_session_pool, _async_session_cache_lock):
@@ -164,6 +166,10 @@ class AsyncHTTPProviderWithProxy(AsyncJSONBaseProvider):
         self._request_kwargs = request_kwargs or {}
 
         super().__init__()
+
+    async def close(self):
+        session = await async_cache_and_return_session_with_proxy(self.endpoint_uri, self.proxy)
+        await session.close()
 
     async def cache_async_session(self, session: ClientSession) -> ClientSession:
         return await async_cache_and_return_session_with_proxy(self.endpoint_uri, self.proxy, session)

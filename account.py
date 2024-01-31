@@ -17,7 +17,7 @@ from models import AccountInfo
 from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
     INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC
-from utils import wait_a_bit, get_w3, to_bytes, async_retry
+from utils import wait_a_bit, get_w3, to_bytes, async_retry, close_w3
 
 
 colorama.init()
@@ -37,6 +37,9 @@ class Account:
         self.w3 = get_w3(self.account.proxy)
         self.insights_contract = self.w3.eth.contract(INSIGHTS_CONTRACT_ADDRESS, abi=INSIGHTS_CONTRACT_ABI)
         self.private_key = None
+
+    async def close(self):
+        await close_w3(self.w3)
 
     async def refresh_profile(self):
         await self.well3.generate_codes()
@@ -81,6 +84,8 @@ class Account:
                 a_start_open = task_title.find('<a href=')
                 a_start_close = task_title[a_start_open:].find('">') + a_start_open
                 task_title = task_title[:a_start_open] + task_title[a_start_close + 2:]
+            elif '<br/>' in task_title:
+                task_title = task_title[:task_title.find('<br/>')]
             title = f"{task_title} [Exp: {task_info['exp']}]"
             if task_id in self.pending_quests:
                 logger.info(f'{self.idx}) {title} in pending verify')
@@ -148,9 +153,8 @@ class Account:
                 case 'twitter-check-profile-banner':
                     return True
                 case unknown_action:
-                    suffix = '. Trying to verify anyway' if FAKE_TWITTER else ''
-                    logger.warning(f'{self.idx}) Unknown special action {unknown_action}{suffix}')
-                    return FAKE_TWITTER
+                    logger.warning(f'{self.idx}) Unknown special action {unknown_action}. Trying to verify anyway')
+                    return True
 
         return True
 
@@ -196,6 +200,9 @@ class Account:
         try:
             _ = await self.w3.eth.estimate_gas(tx)
         except Exception as e:
+            if self.profile["contractInfo"].get("linkedAddress") == self.account.address:
+                logger.info(f'{self.idx}) Tx simulation failed, refreshing signatures and retrying')
+                await self.refresh_profile()
             raise Exception(f'Tx simulation failed: {str(e)}')
         tx['gas'] = 300000
 
@@ -228,7 +235,7 @@ class Account:
                                 if data is None:
                                     continue
                                 data = data.hex()[2:]
-                                values = [int(data[i:i+64], 16) for i in range(0, len(data), 64)]
+                                values = [int(data[i:i+64], 16) for i in range(0, 64 * 6, 64)]
                                 pretty_str = []
                                 for idx, val in enumerate(values[2:]):
                                     if val == 0:
@@ -256,17 +263,34 @@ class Account:
         nonce = daily_quest['nonce']
         used = await self.insights_contract.functions.nonceUsed(nonce).call()
         self.account.daily_insight = 'claimed' if used else 'available'
-        return self.account.daily_insight
+        if self.profile['dailyBonusInfo']['status']['superQuestEligible']:
+            self.account.daily_insight = 'SUPER ' + self.account.daily_insight
+        return self.account.daily_insight_colored
 
     async def claim_daily_insight(self) -> int:
         logger.info(f'{self.idx}) Daily insight status: {await self.check_daily_insight()}')
-        if self.account.daily_insight != 'available':
+        if not self.account.daily_insight.endswith('available'):
             return 0
-        daily_quest = self.profile['contractInfo']['dailyQuest']
-        nonce = daily_quest['nonce']
-        signature = to_bytes(daily_quest['signature'])
-        tx_hash = await self.build_and_send_tx(self.insights_contract.functions.nonceQuest(nonce, signature))
-        await self.tx_verification(tx_hash, 'Claim daily insight')
+
+        is_super_log = ''
+        if self.profile['dailyBonusInfo']['status']['superQuestEligible']:
+            is_super_log = 'SUPER '
+            super_daily_quest = self.profile['contractInfo']['dailyQuestSuper']
+            nonces = super_daily_quest['nonces']
+            prob_set_number = super_daily_quest['probSetNumber']
+            signatures = [to_bytes(sig) for sig in super_daily_quest['signatures']]
+            tags = super_daily_quest['tags']
+            tx_hash = await self.build_and_send_tx(
+                self.insights_contract.functions.nonceQuests(nonces, tags, prob_set_number, signatures)
+            )
+        else:
+            daily_quest = self.profile['contractInfo']['dailyQuest']
+            nonce = daily_quest['nonce']
+            signature = to_bytes(daily_quest['signature'])
+            tx_hash = await self.build_and_send_tx(self.insights_contract.functions.nonceQuest(nonce, signature))
+
+        await self.tx_verification(tx_hash, f'Claim {is_super_log}daily insight')
+
         return 1
 
     @async_retry

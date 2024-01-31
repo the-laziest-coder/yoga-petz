@@ -1,6 +1,10 @@
 import json
 
 
+USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+SEC_CH_UA = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"'
+SEC_CH_UA_PLATFORM = '"macOS"'
+
 SITE_API_KEY = 'AIzaSyBPmETcQFfpDrw_eB6s8DCkDpYYBt3e8Wg'
 
 SHARE_TWEET_FORMAT = '''Exciting news! 🧘
@@ -24,6 +28,6 @@ INSIGHTS_CONTRACT_ABI = json.load(open('abi/insights.json'))
 
 SCAN = 'https://opbnb.bscscan.com'
 
-LOG_RESULT_TOPIC = '0x62437e973c89fadc3c7ae00cbd583c7225d842db5d4a5f003b322a8ab08b780a'
+LOG_RESULT_TOPIC = '0x00c995826b58cdd58dce644ee35d6a6db72c38615f9a3ed6184af4b3d7379540'
 LOG_DATA_NAME_AND_COLOR = [('Uncommon', 'green'), ('Rare', 'cyan'),
                            ('Legendary', 'light_magenta'), ('Mythical', 'light_yellow')]

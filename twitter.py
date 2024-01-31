@@ -8,8 +8,9 @@ import aiohttp
 from aiohttp_socks import ProxyConnector
 
 from models import AccountInfo
-from utils import is_empty, handle_response, async_retry
+from utils import is_empty, handle_aio_response, async_retry
 from config import DISABLE_SSL
+from vars import USER_AGENT, SEC_CH_UA, SEC_CH_UA_PLATFORM
 
 
 def generate_csrf_token(size=16):
@@ -19,10 +20,10 @@ def generate_csrf_token(size=16):
 
 def _get_headers(info: AccountInfo) -> dict:
     if is_empty(info.user_agent):
-        ua = ua_generator.generate(device='desktop', browser='chrome')
-        info.user_agent = ua.text
-        info.sec_ch_ua = f'"{ua.ch.brands[2:]}"'
-        info.sec_ch_ua_platform = f'"{ua.platform.title()}"'
+        # ua = ua_generator.generate(device='desktop', browser='chrome')
+        info.user_agent = USER_AGENT
+        info.sec_ch_ua = SEC_CH_UA
+        info.sec_ch_ua_platform = SEC_CH_UA_PLATFORM
     return {
         'accept': '*/*',
         'accept-language': 'en;q=0.9',
@@ -82,11 +83,11 @@ class Twitter:
             if method.lower() == 'get':
                 async with sess.get(url, **kwargs) as resp:
                     self.set_cookies(resp.cookies)
-                    return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
+                    return await handle_aio_response(resp, acceptable_statuses, resp_handler, with_text)
             elif method.lower() == 'post':
                 async with sess.post(url, **kwargs) as resp:
                     self.set_cookies(resp.cookies)
-                    return await handle_response(resp, acceptable_statuses, resp_handler, with_text)
+                    return await handle_aio_response(resp, acceptable_statuses, resp_handler, with_text)
             else:
                 raise Exception('Wrong request method')
 
@@ -102,7 +103,8 @@ class Twitter:
                     new_csrf = new_csrf.value
                     return new_csrf
         except Exception as e:
-            raise Exception(f'Failed get ct0: {str(e)}')
+            reason = 'Your account has been locked\n' if 'Your account has been locked' in str(e) else ''
+            raise Exception(f'Failed to ct0 for twitter: {reason}{str(e)}')
 
     async def get_my_username(self):
         url = 'https://api.twitter.com/1.1/account/settings.json'

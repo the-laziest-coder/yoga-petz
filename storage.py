@@ -15,6 +15,10 @@ class Storage:
 
     def init(self):
         with open(self.filename, 'r', encoding='utf-8') as file:
+            if len(file.read().strip()) == 0:
+                self.data = {}
+                return
+        with open(self.filename, 'r', encoding='utf-8') as file:
             converted_data = json.load(file)
         self.data = {a: AccountInfo.from_dict(i) for a, i in converted_data.items()}
 
@@ -23,6 +27,9 @@ class Storage:
         if info is None:
             return None
         return deepcopy(info)
+
+    def set_final_account_info(self, address: str, info: AccountInfo):
+        self.data[address] = deepcopy(info)
 
     def remove(self, address: str):
         if address in self.data:
@@ -34,7 +41,11 @@ class Storage:
 
     async def set_account_info(self, address: str, info: AccountInfo):
         async with self.lock:
-            self.data[address] = deepcopy(info)
+            self.set_final_account_info(address, info)
+
+    async def async_save(self):
+        async with self.lock:
+            self.save()
 
     def save(self):
         converted_data = {a: i.to_dict() for a, i in self.data.items()}
