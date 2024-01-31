@@ -5,6 +5,8 @@ Brotli==1.0.9
 colorama==0.4.6
 dataclasses_json==0.6.3
 eth_account==0.10.0
+eth_typing==3.5.2
+eth_utils==2.3.1
 loguru==0.7.0
 retry==0.9.2
 termcolor==2.4.0
