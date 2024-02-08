@@ -195,6 +195,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
                 await wait_a_bit(5)
                 await account.claim_rank_insights()
         except Exception as e:
+            wrong_linked_wallet = ''
             if account.profile["contractInfo"].get("linkedAddress").lower() != address.lower():
                 wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
             elif 'execution reverted' in str(e):
