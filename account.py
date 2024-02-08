@@ -273,10 +273,10 @@ class Account:
             self.account.daily_insight = 'SUPER ' + self.account.daily_insight
         return self.account.daily_insight_colored
 
-    async def claim_daily_insight(self) -> int:
+    async def claim_daily_insight(self):
         logger.info(f'{self.idx}) Daily insight status: {await self.check_daily_insight()}')
         if not self.account.daily_insight.endswith('available'):
-            return 0
+            return
 
         is_super_log = ''
         if self.profile['dailyBonusInfo']['status']['superQuestEligible']:
@@ -296,8 +296,8 @@ class Account:
             tx_hash = await self.build_and_send_tx(self.insights_contract.functions.nonceQuest(nonce, signature))
 
         await self.tx_verification(tx_hash, f'Claim {is_super_log}daily insight')
-
-        return 1
+        await wait_a_bit(2)
+        await self.refresh_profile()
 
     @async_retry
     async def check_rank_insights(self):
@@ -307,10 +307,10 @@ class Account:
         self.account.insights_to_open = cnt
         return self.account.insights_to_open
 
-    async def claim_rank_insights(self) -> int:
+    async def claim_rank_insights(self):
         logger.info(f'{self.idx}) Rank insights available to open: {await self.check_rank_insights()}')
         if self.account.insights_to_open < MIN_INSIGHTS_TO_OPEN:
-            return 0
+            return
         rank_quest = self.profile['contractInfo']['rankupQuest']
         current_rank = rank_quest['currentRank']
         signature = to_bytes(rank_quest['signature'])
@@ -318,7 +318,8 @@ class Account:
                                                rankupQuestAmount(current_rank, signature,
                                                                  self.account.insights_to_open))
         await self.tx_verification(tx_hash, 'Claim rank insight')
-        return 1
+        await wait_a_bit(2)
+        await self.refresh_profile()
 
     @async_retry
     async def check_results(self):

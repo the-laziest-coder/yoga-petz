@@ -1,4 +1,5 @@
 import csv
+import time
 import random
 import aiohttp
 import aiofiles
@@ -18,7 +19,7 @@ from well3 import Well3
 from account import Account
 from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
-    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO
+    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS
 from utils import wait_a_bit, async_retry
 
 
@@ -187,20 +188,19 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
         await account.link_wallet_if_needed(wallet)
 
-        claimed = 0
         try:
             if CLAIM_DAILY_INSIGHT:
                 await wait_a_bit(5)
-                claimed += await account.claim_daily_insight()
+                await account.claim_daily_insight()
             if CLAIM_RANK_INSIGHTS:
                 await wait_a_bit(5)
-                claimed += await account.claim_rank_insights()
+                await account.claim_rank_insights()
         except Exception as e:
-            logger.error(f'{idx}) Claim error: {str(e)}. '
-                         f'Linked wallet: {account.profile["contractInfo"].get("linkedAddress")}')
-
-        if claimed > 0:
-            await account.refresh_profile()
+            if account.profile["contractInfo"].get("linkedAddress").lower() == address.lower():
+                wrong_linked_wallet = 'Probably rerun will help'
+            else:
+                wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
+            logger.error(f'{idx}) Claim error: {str(e)}. {wrong_linked_wallet}')
 
         logger.info(f'{idx}) Checking insights')
         await account.check_insights()
@@ -348,6 +348,7 @@ def main():
         'breathe': 0,
     }
     all_invite_codes = []
+    daily_available_acc_ids = []
     for idx, w in enumerate(wallets, start=1):
         address = EthAccount().from_key(w).address
 
@@ -368,6 +369,7 @@ def main():
         total['mythical'] += account.insights.get('mythical', 0)
         if account.daily_insight.endswith('available'):
             total['daily_available'] += 1
+            daily_available_acc_ids.append(idx)
         elif account.daily_insight.endswith('claimed'):
             total['daily_claimed'] += 1
         total['to_open'] += account.insights_to_open
@@ -401,6 +403,9 @@ def main():
         for ic in all_invite_codes:
             file.write(f'{ic}\n')
 
+    daily_available_acc_ids = [i for i in daily_available_acc_ids if i <= 110]
+
+    logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
     logger.info('Stats are stored in results/stats.csv')
     logger.info('Invite codes are stored in results/invites.txt')
     logger.info(f'Timestamp: {run_timestamp}')
@@ -418,4 +423,15 @@ if __name__ == '__main__':
     cprint(' https://t.me/thelaziestcoder ', 'magenta', end='')
     cprint('################', 'cyan')
     cprint('###############################################################\n', 'cyan')
-    main()
+
+    if LOOP_RUNS:
+        while True:
+            st = int(time.time())
+            main()
+            time.sleep(3600 * 3)
+            time.sleep(random.randint(1, 20) * 60)
+            main()
+            time.sleep(3600 * 24 - (int(time.time()) - st))
+            time.sleep(random.randint(0, 120))
+    else:
+        main()
