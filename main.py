@@ -87,11 +87,12 @@ class InvitesHandler:
 
 
 @async_retry
-async def change_ip(link: str):
+async def change_ip(idx, link: str):
     async with aiohttp.ClientSession() as sess:
         async with sess.get(link) as resp:
             if resp.status != 200:
                 raise Exception(f'Failed to change ip: Status = {resp.status}. Response = {await resp.text()}')
+            logger.info(f'{idx}) Successfully changed ip: {await resp.text()}')
 
 
 async def refresh(prefix: str, address: str, storage: Storage, check_insights: bool = False):
@@ -101,8 +102,7 @@ async def refresh(prefix: str, address: str, storage: Storage, check_insights: b
         return None
     if '|' in account_info.proxy:
         change_link = account_info.proxy.split('|')[1]
-        await change_ip(change_link)
-        logger.info(f'{prefix}) Successfully changed ip')
+        await change_ip(prefix, change_link)
     twitter = Twitter(account_info)
     await twitter.start()
     well3 = Well3(prefix, account_info, twitter)
@@ -143,8 +143,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
     if '|' in account_info.proxy:
         change_link = account_info.proxy.split('|')[1]
-        await change_ip(change_link)
-        logger.info(f'{idx}) Successfully changed ip')
+        await change_ip(idx, change_link)
 
     twitter = Twitter(account_info)
     await twitter.start()
