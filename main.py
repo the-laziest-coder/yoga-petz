@@ -403,7 +403,7 @@ def main():
         for ic in all_invite_codes:
             file.write(f'{ic}\n')
 
-    daily_available_acc_ids = [i for i in daily_available_acc_ids if i <= 110]
+    daily_available_acc_ids = [i for i in daily_available_acc_ids]
 
     logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
     logger.info('Stats are stored in results/stats.csv')
