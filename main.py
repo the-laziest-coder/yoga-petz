@@ -241,7 +241,7 @@ async def log_long_exc(idx, msg, e):
     logger.error(f'{idx}) {msg}: {e_msg_lines[0]}')
     if len(e_msg_lines) > 1:
         async with aiofiles.open('logs/errors.txt', 'a', encoding='utf-8') as file:
-            await file.write(f'{str(datetime.now())} | {d[0]}) Process account error: {e_msg}')
+            await file.write(f'{str(datetime.now())} | {idx}) Process account error: {e_msg}')
             await file.flush()
 
 
