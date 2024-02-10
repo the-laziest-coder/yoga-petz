@@ -116,18 +116,18 @@ async def refresh(prefix: str, address: str, storage: Storage, check_insights: b
     return account_info
 
 
-async def refresh_account(account_data: Tuple[int, Tuple[str, str, str]], storage: Storage, _):
-    idx, (wallet, proxy, twitter_token) = account_data
+async def refresh_account(account_data, storage: Storage, _):
+    idx, (wallet, proxy, twitter_token, _) = account_data
     address = EthAccount().from_key(wallet).address
     await refresh(f'Refreshing account {idx}', address, storage, check_insights=True)
     return ProcessResult()
 
 
-async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storage: Storage, invites: InvitesHandler) \
+async def process_account(account_data, storage: Storage, invites: InvitesHandler) \
         -> ProcessResult:
     result = ProcessResult()
 
-    idx, (wallet, proxy, twitter_token) = account_data
+    idx, (wallet, proxy, twitter_token, prompt) = account_data
     address = EthAccount().from_key(wallet).address
     logger.info(f'{idx}) Processing {address}')
 
@@ -140,6 +140,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
             account_info.proxy = proxy
             account_info.twitter_auth_token = twitter_token
         logger.info(f'{idx}) Saved account info restored')
+    account_info.mint_prompt = prompt
 
     if '|' in account_info.proxy:
         change_link = account_info.proxy.split('|')[1]
@@ -181,11 +182,11 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
 
         logger.info(f'{idx}) Profile refreshed')
 
+        await account.link_wallet_if_needed(wallet)
+
         if DO_TASKS:
             if await account.do_quests() > 0:
                 await account.refresh_profile()
-
-        await account.link_wallet_if_needed(wallet)
 
         try:
             if CLAIM_DAILY_INSIGHT:
@@ -200,7 +201,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
                 wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
             elif 'execution reverted' in str(e):
                 wrong_linked_wallet = 'Probably rerun will help'
-            logger.error(f'{idx}) Claim error: {str(e)}. {wrong_linked_wallet}')
+            await log_long_exc(idx, f'Claim error. {wrong_linked_wallet}', e)
 
         logger.info(f'{idx}) Checking insights')
         await account.check_insights()
@@ -214,8 +215,7 @@ async def process_account(account_data: Tuple[int, Tuple[str, str, str]], storag
     return result
 
 
-async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
-                        storage: Storage, invites: InvitesHandler,
+async def process_batch(bid: int, batch, storage: Storage, invites: InvitesHandler,
                         async_func, sleep):
     await asyncio.sleep(WAIT_BETWEEN_ACCOUNTS[0] / THREADS_NUM * bid)
     failed, used_invites = [], 0
@@ -228,20 +228,24 @@ async def process_batch(bid: int, batch: List[Tuple[int, Tuple[str, str, str]]],
                 used_invites += 1
         except Exception as e:
             failed.append(d)
-            e_msg = str(e)
-            if e_msg == '':
-                e_msg = ' '
-            e_msg_lines = e_msg.splitlines()
-            logger.error(f'{d[0]}) Process account error: {e_msg_lines[0]}')
-            if len(e_msg_lines) > 1:
-                async with aiofiles.open('logs/errors.txt', 'a', encoding='utf-8') as file:
-                    await file.write(f'{str(datetime.now())} | {d[0]}) Process account error: {e_msg}')
-                    await file.flush()
+            await log_long_exc(d[0], 'Process account error', e)
 
     return failed, used_invites
 
 
-async def process(batches: List[List[Tuple[int, Tuple[str, str, str]]]], storage: Storage, invites: InvitesHandler,
+async def log_long_exc(idx, msg, e):
+    e_msg = str(e)
+    if e_msg == '':
+        e_msg = ' '
+    e_msg_lines = e_msg.splitlines()
+    logger.error(f'{idx}) {msg}: {e_msg_lines[0]}')
+    if len(e_msg_lines) > 1:
+        async with aiofiles.open('logs/errors.txt', 'a', encoding='utf-8') as file:
+            await file.write(f'{str(datetime.now())} | {d[0]}) Process account error: {e_msg}')
+            await file.flush()
+
+
+async def process(batches, storage: Storage, invites: InvitesHandler,
                   async_func, sleep=True):
     tasks = []
     for idx, b in enumerate(batches):
@@ -264,12 +268,20 @@ def main():
         invites = file.read().splitlines()
         invites = [i.strip() for i in invites]
         invites = [i for i in invites if i != '']
+    with open('files/prompts.txt', 'r', encoding='utf-8') as file:
+        prompts = file.read().splitlines()
+        prompts = [p.strip() for p in prompts]
 
+    if len(prompts) == 0:
+        prompts = ['' for _ in wallets]
     if len(wallets) != len(proxies):
         logger.error('Proxies count does not match wallets count')
         return
     if len(wallets) != len(twitters):
         logger.error('Twitter count does not match wallets count')
+        return
+    if len(wallets) != len(prompts):
+        logger.error('Prompts count does not match wallets count')
         return
 
     storage = Storage('storage/data.json')
@@ -287,11 +299,11 @@ def main():
     want_only = []
 
     def get_batches(skip: int = None, threads: int = THREADS_NUM):
-        _data = list(enumerate(list(zip(wallets, proxies, twitters)), start=1))
+        _data = list(enumerate(list(zip(wallets, proxies, twitters, prompts)), start=1))
         if skip is not None:
             _data = _data[skip:]
         if skip is not None and len(want_only) > 0:
-            _data = [d for d in enumerate(list(zip(wallets, proxies, twitters)), start=1) if d[0] in want_only]
+            _data = [d for d in enumerate(list(zip(wallets, proxies, twitters, prompts)), start=1) if d[0] in want_only]
         if RANDOM_ORDER:
             random.shuffle(_data)
         _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(threads)]

@@ -1,8 +1,7 @@
-import aiohttp
 import time
+import aiohttp
 
 from typing import Union
-from loguru import logger
 from aiohttp_socks import ProxyConnector
 
 from models import AccountInfo
@@ -267,3 +266,14 @@ class Well3:
             }, acceptable_statuses=[200])
         except Exception as e:
             raise Exception(f'Failed to link wallet: {str(e)}')
+
+    async def tokens_of_owner(self, token_id):
+        try:
+            self.headers.pop('authorization')
+            resp = await self.request('GET', f'{self.API_URL}/well3nft/tokens-of-owner/'
+                                             f'{self.account.address}/{token_id}', [200], lambda r: r)
+            self.headers['authorization'] = self.account.well3_auth_token
+            return resp['tokens']
+        except Exception as e:
+            self.headers['authorization'] = self.account.well3_auth_token
+            raise Exception(f'Failed to get tokens of owner: {str(e)}')

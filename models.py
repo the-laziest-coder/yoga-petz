@@ -27,6 +27,7 @@ class AccountInfo:
     daily_insight: str = 'unavailable'
     insights: dict[str, int] = field(default_factory=dict)
     invite_codes: List[str] = field(default_factory=list)
+    mint_prompt: str = ''
 
     def next_breathe_str(self) -> str:
         if type(self.next_breathe_time) is str:

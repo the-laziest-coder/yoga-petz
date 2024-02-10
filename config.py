@@ -4,7 +4,7 @@ MAX_TRIES = 2
 
 RPC = 'https://opbnb-mainnet-rpc.bnbchain.org'
 
-THREADS_NUM = 1
+THREADS_NUM = 2
 
 MOBILE_PROXY = False
 DISABLE_SSL = False
@@ -12,7 +12,7 @@ DISABLE_SSL = False
 UPDATE_STORAGE_ACCOUNT_INFO = False
 
 SKIP_FIRST_ACCOUNTS = 0
-RANDOM_ORDER = True
+RANDOM_ORDER = False
 
 LOOP_RUNS = False
 
