@@ -2,7 +2,6 @@ import csv
 import time
 import random
 import aiohttp
-import aiofiles
 import asyncio
 
 from termcolor import cprint
@@ -19,8 +18,8 @@ from well3 import Well3
 from account import Account
 from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
-    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS
-from utils import wait_a_bit, async_retry
+    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS, RANDOM_BATCH_CNT
+from utils import wait_a_bit, async_retry, log_long_exc
 
 
 class InvitesHandler:
@@ -123,6 +122,10 @@ async def refresh_account(account_data, storage: Storage, _):
     return ProcessResult()
 
 
+claim_error_ids = []
+claim_error_lock = asyncio.Lock()
+
+
 async def process_account(account_data, storage: Storage, invites: InvitesHandler) \
         -> ProcessResult:
     result = ProcessResult()
@@ -202,6 +205,8 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
             elif 'execution reverted' in str(e):
                 wrong_linked_wallet = 'Probably rerun will help'
             await log_long_exc(idx, f'Claim error. {wrong_linked_wallet}', e)
+            async with claim_error_lock:
+                claim_error_ids.append(idx)
 
         logger.info(f'{idx}) Checking insights')
         await account.check_insights()
@@ -231,18 +236,6 @@ async def process_batch(bid: int, batch, storage: Storage, invites: InvitesHandl
             await log_long_exc(d[0], 'Process account error', e)
 
     return failed, used_invites
-
-
-async def log_long_exc(idx, msg, e):
-    e_msg = str(e)
-    if e_msg == '':
-        e_msg = ' '
-    e_msg_lines = e_msg.splitlines()
-    logger.error(f'{idx}) {msg}: {e_msg_lines[0]}')
-    if len(e_msg_lines) > 1:
-        async with aiofiles.open('logs/errors.txt', 'a', encoding='utf-8') as file:
-            await file.write(f'{str(datetime.now())} | {idx}) Process account error: {e_msg}')
-            await file.flush()
 
 
 async def process(batches, storage: Storage, invites: InvitesHandler,
@@ -304,8 +297,10 @@ def main():
             _data = _data[skip:]
         if skip is not None and len(want_only) > 0:
             _data = [d for d in enumerate(list(zip(wallets, proxies, twitters, prompts)), start=1) if d[0] in want_only]
-        if RANDOM_ORDER:
+        if RANDOM_ORDER or RANDOM_BATCH_CNT:
             random.shuffle(_data)
+        if RANDOM_BATCH_CNT:
+            _data = _data[:RANDOM_BATCH_CNT]
         _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(threads)]
         for _idx, d in enumerate(_data):
             _batches[_idx % threads].append(d)
@@ -331,22 +326,16 @@ def main():
     logger.info(f'Failed ids: {failed}')
     print()
 
-    if len(want_only) == 0:
-        logger.info('Refreshing accounts profiles')
-        loop.run_until_complete(process(
-            get_batches(), storage, invites_handler,
-            refresh_account,
-            sleep=MOBILE_PROXY)
-        )
-        storage.save()
-        print()
+    logger.info(f'Claim error: {claim_error_ids}')
+    print()
 
     loop.run_until_complete(close_all_sessions())
 
     logger.info(f'Used invites: {used_invites}')
 
     csv_data = [['#', 'Address', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
-                 'Daily insight', 'Insights to open', 'Pending quests', 'Next breathe', 'Invite codes', 'Exp', 'Lvl']]
+                 'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe',
+                 'Invite codes', 'Exp', 'Lvl']]
     total = {
         'total': 0,
         'uncommon': 0,
@@ -355,12 +344,14 @@ def main():
         'mythical': 0,
         'daily_claimed': 0,
         'daily_available': 0,
+        'daily_minted': 0,
         'to_open': 0,
         'pending': 0,
         'breathe': 0,
     }
     all_invite_codes = []
     daily_available_acc_ids = []
+    daily_mint_not_done_ids = []
     for idx, w in enumerate(wallets, start=1):
         address = EthAccount().from_key(w).address
 
@@ -384,6 +375,10 @@ def main():
             daily_available_acc_ids.append(idx)
         elif account.daily_insight.endswith('claimed'):
             total['daily_claimed'] += 1
+        if account.daily_mint:
+            total['daily_minted'] += 1
+        else:
+            daily_mint_not_done_ids.append(idx)
         total['to_open'] += account.insights_to_open
         total['pending'] += account.pending_quests
         if account.next_breathe_str() == 'Completed':
@@ -393,16 +388,16 @@ def main():
                          account.insights.get('uncommon'), account.insights.get('rare'),
                          account.insights.get('legendary'), account.insights.get('mythical'),
                          account.daily_insight.capitalize(), account.insights_to_open,
-                         account.pending_quests, account.next_breathe_str(), len(account.invite_codes),
-                         account.exp, account.lvl])
+                         account.pending_quests, account.daily_mint, account.next_breathe_str(),
+                         len(account.invite_codes), account.exp, account.lvl])
 
     csv_data.extend([[], ['', 'Total', total['total'],
                           total['uncommon'], total['rare'],
                           total['legendary'], total['mythical'],
                           f'{total["daily_available"]}/{total["daily_claimed"]}',
-                          total['to_open'], total['pending'], total['breathe']]])
+                          total['to_open'], total['pending'], total['daily_minted'], total['breathe']]])
     csv_data.append(['', '', '', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
-                     'Daily insight', 'Insights to open', 'Pending quests', 'Next breathe'])
+                     'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe'])
 
     run_timestamp = str(datetime.now())
     csv_data.extend([[], ['', 'Timestamp', run_timestamp]])
@@ -416,8 +411,10 @@ def main():
             file.write(f'{ic}\n')
 
     daily_available_acc_ids = [i for i in daily_available_acc_ids]
+    daily_mint_not_done_ids = [i for i in daily_mint_not_done_ids]
 
     logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
+    logger.info(f'Daily mint not done accounts: {daily_mint_not_done_ids}\n')
     logger.info('Stats are stored in results/stats.csv')
     logger.info('Invite codes are stored in results/invites.txt')
     logger.info(f'Timestamp: {run_timestamp}')

@@ -14,14 +14,23 @@ from web3.exceptions import TransactionNotFound
 from well3 import Well3
 from twitter import Twitter
 from models import AccountInfo
-from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER
+from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER, MINT_DAILY_NFT_PERCENT
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
     INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC, \
     MINT_TAGS, MINT_CONTRACT_ADDRESS
-from utils import wait_a_bit, get_w3, to_bytes, async_retry, close_w3
+from utils import wait_a_bit, get_w3, to_bytes, async_retry, close_w3, log_long_exc
 
 
 colorama.init()
+
+
+with open('files/english_words.txt', 'r', encoding='utf-8') as words_file:
+    english_words = words_file.read().splitlines()
+    english_words = [w for w in english_words if len(w) > 2]
+
+
+def get_random_words(n: int):
+    return ' '.join(list(random.sample(english_words, n)))
 
 
 class Account:
@@ -82,8 +91,13 @@ class Account:
         logger.info(f'{self.idx}) Starting {batch_name} tasks...')
         cnt = 0
         for task_id, task_info in self.quests[batch_name].items():
+            is_daily_mint = 'special' in task_info and task_info['special']['action'] == 'mint-daily-well3nft'
             if task_info['expClaimed']:
+                if is_daily_mint:
+                    self.account.daily_mint = True
                 continue
+            if is_daily_mint:
+                self.account.daily_mint = False
             task_title = task_info['title']
             if '</a>' in task_title:
                 a_end = task_title.find('</a>')
@@ -100,9 +114,16 @@ class Account:
             logger.info(f'{self.idx}) {title}')
             done = await self.do_task(task_info)
             if done:
-                await self.well3.claim_exp(task_id)
-                logger.success(f'{self.idx}) Claimed exp or started verification')
-                cnt += 1
+                try:
+                    await self.well3.claim_exp(task_id)
+                    if is_daily_mint:
+                        self.account.daily_mint = True
+                    logger.success(f'{self.idx}) Claimed exp or started verification')
+                    cnt += 1
+                except Exception as e:
+                    if not is_daily_mint:
+                        raise e
+                    await log_long_exc(self.idx, 'CLaim daily mint failed', e, warning=True)
                 await wait_a_bit(random.uniform(3, 5))
         return cnt
 
@@ -160,6 +181,9 @@ class Account:
                 case 'twitter-check-profile-banner':
                     return True
                 case 'mint-daily-well3nft':
+                    if random.randint(1, 100) > MINT_DAILY_NFT_PERCENT:
+                        logger.info(f'{self.idx}) Random skip daily Well3NFT mint')
+                        return False
                     try:
                         return await self.mint_daily_well3_nft(task_info)
                     except Exception as e:
@@ -208,8 +232,9 @@ class Account:
             return True
 
         if len(self.account.mint_prompt) == 0:
-            logger.warning(f'{self.idx}) Empty mint prompt for account. Can\'t mint')
-            return False
+            logger.info(f'{self.idx}) Empty mint prompt for account. Using random words')
+            self.account.mint_prompt = get_random_words(random.randint(1, 2))
+
         tags = random.sample(MINT_TAGS, random.randint(1, 4))
         prompt = ','.join([self.account.mint_prompt] + tags)
 
@@ -245,7 +270,7 @@ class Account:
 
         logger.info(f'{self.idx}) Waiting for Well3NFT in API')
 
-        for _ in range(5):
+        for _ in range(3):
             await asyncio.sleep(20)
             try:
                 tokens = await self.well3.tokens_of_owner(0)
@@ -257,7 +282,7 @@ class Account:
                 print(traceback.format_exc())
                 logger.warning(f'{self.idx}) Failed request for Well3NFT: {str(e)}')
 
-        logger.error(f"{self.idx}) Well3NFT didn't appear in API for 100s. Try to claim anyway")
+        logger.error(f"{self.idx}) Well3NFT didn't appear in API for 60s. Try to claim anyway")
         return True
 
     @async_retry

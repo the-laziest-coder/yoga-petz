@@ -25,6 +25,7 @@ class AccountInfo:
     pending_quests: int = 0
     insights_to_open: int = 0
     daily_insight: str = 'unavailable'
+    daily_mint: bool = False
     insights: dict[str, int] = field(default_factory=dict)
     invite_codes: List[str] = field(default_factory=list)
     mint_prompt: str = ''
@@ -45,6 +46,7 @@ class AccountInfo:
                f'\tLvl: {self.lvl}\n' \
                f'\tPending quests: {self.pending_quests}\n' \
                f'\tNext breathe: {self.next_breathe_str()}\n' \
+               f'\tDaily mint: {self.daily_mint}\n' \
                f'\tInsights to open: {self.insights_to_open}\n' \
                f'\tDaily insight: {self.daily_insight_colored}\n' \
                f'\tInsights:\n{insights_str}\n' \

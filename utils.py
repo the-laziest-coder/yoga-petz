@@ -1,8 +1,11 @@
 import random
 import asyncio
+import aiofiles
 from retry import retry
 from web3 import AsyncWeb3
 from typing import cast
+from loguru import logger
+from datetime import datetime
 from async_web3 import AsyncHTTPProviderWithProxy
 from config import RPC, MAX_TRIES
 from aiohttp import ClientResponse
@@ -84,3 +87,16 @@ def async_retry(async_func):
                 delay = min(delay, 10)
 
     return wrapper
+
+
+async def log_long_exc(idx, msg, e, warning=False):
+    e_msg = str(e)
+    if e_msg == '':
+        e_msg = ' '
+    e_msg_lines = e_msg.splitlines()
+    log = logger.warning if warning else logger.error
+    log(f'{idx}) {msg}: {e_msg_lines[0]}')
+    if len(e_msg_lines) > 1:
+        async with aiofiles.open('logs/errors.txt', 'a', encoding='utf-8') as file:
+            await file.write(f'{str(datetime.now())} | {idx}) Process account error: {e_msg}')
+            await file.flush()
