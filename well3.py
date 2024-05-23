@@ -34,7 +34,7 @@ def _get_headers(info: AccountInfo) -> dict:
 
 class Well3:
     AUTH_API_URL = 'https://well3.com/assets/__/auth/handler'
-    API_URL = 'https://api.gm.io'
+    API_URL = 'https://api.well3.com'
 
     GOOGLE_CREATE_AUTH_HEADERS = {
         'x-client-version': 'Chrome/Handler/2.20.2/FirebaseCore-web',
@@ -277,3 +277,25 @@ class Well3:
         except Exception as e:
             self.headers['authorization'] = self.account.well3_auth_token
             raise Exception(f'Failed to get tokens of owner: {str(e)}')
+
+    async def well_id(self):
+        try:
+            return await self.request('GET', f'{self.API_URL}/well-id/me',
+                                      [200], lambda r: r, headers={
+                    'origin': 'https://well.eco',
+                    'referer': f'https://well.eco/'
+                })
+        except Exception as e:
+            raise Exception(f'Failed to get Well ID info: {e}')
+
+    async def ring_register(self, country):
+        try:
+            await self.request('POST', f'{self.API_URL}/well-id/register-country/{country}',
+                               [200], headers={
+                    'Content-Length': '0',
+                    'Content-Type': 'application/json',
+                    'origin': 'https://well.eco',
+                    'referer': f'https://well.eco/'
+                })
+        except Exception as e:
+            raise Exception(f'Failed to register for Ring: {e}')

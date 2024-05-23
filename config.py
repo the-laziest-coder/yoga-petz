@@ -30,3 +30,9 @@ CLAIM_RANK_INSIGHTS = True
 MIN_INSIGHTS_TO_OPEN = 5
 
 CHECKER_UPDATE_STORAGE = False
+
+WELL_ID_MODE = True
+# List of countries for Ring registration. Selects random.
+# Full list of available countries in files/countries.json
+# Example: ["AD", "AT", "EC"]
+RING_COUNTRIES = []

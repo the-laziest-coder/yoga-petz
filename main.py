@@ -18,7 +18,8 @@ from well3 import Well3
 from account import Account
 from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
-    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS, RANDOM_BATCH_CNT
+    SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS, RANDOM_BATCH_CNT, \
+    RING_COUNTRIES, WELL_ID_MODE
 from utils import wait_a_bit, async_retry, log_long_exc
 
 
@@ -179,37 +180,62 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
 
     logger.info(f'{idx}) Signed in')
 
-    async with Account(idx, account_info, well3, twitter) as account:
+    if WELL_ID_MODE:
+        well_id_info = await well3.well_id()
+        for _ in range(10):
+            if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
+                logger.info(f'{idx}) Waiting for Well ID mint 10s more')
+                await asyncio.sleep(10)
+                well_id_info = well3.well_id()
+        if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
+            logger.info(f'{idx}) Minting Well ID takes too long')
+        else:
+            logger.info(f'{idx}) Well ID minted with name {well_id_info["token"].get("name")}')
+            account_info.well_id = True
+            if well_id_info['country'] is None:
+                country = random.choice(RING_COUNTRIES)
+                logger.info(f'{idx}) Registering for Ring for country {country}')
+                await well3.ring_register(country)
+                well_id_info = await well3.well_id()
+                if well_id_info['country'] != country:
+                    logger.error(f'{idx}) Failed to register for Ring')
+                else:
+                    logger.success(f'{idx}) Successfully registered for Ring')
+            else:
+                logger.info(f'{idx}) Ring registration was already done')
+            account_info.ring_registered = well_id_info['country'] is not None
+    else:
+        async with Account(idx, account_info, well3, twitter) as account:
 
-        await account.refresh_profile()
+            await account.refresh_profile()
 
-        logger.info(f'{idx}) Profile refreshed')
+            logger.info(f'{idx}) Profile refreshed')
 
-        await account.link_wallet_if_needed(wallet)
+            await account.link_wallet_if_needed(wallet)
 
-        if DO_TASKS:
-            if await account.do_quests() > 0:
-                await account.refresh_profile()
+            if DO_TASKS:
+                if await account.do_quests() > 0:
+                    await account.refresh_profile()
 
-        try:
-            if CLAIM_DAILY_INSIGHT:
-                await wait_a_bit(5)
-                await account.claim_daily_insight()
-            if CLAIM_RANK_INSIGHTS:
-                await wait_a_bit(5)
-                await account.claim_rank_insights()
-        except Exception as e:
-            wrong_linked_wallet = ''
-            if account.profile["contractInfo"].get("linkedAddress").lower() != address.lower():
-                wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
-            elif 'execution reverted' in str(e):
-                wrong_linked_wallet = 'Probably rerun will help'
-            await log_long_exc(idx, f'Claim error. {wrong_linked_wallet}', e)
-            async with claim_error_lock:
-                claim_error_ids.append(idx)
+            try:
+                if CLAIM_DAILY_INSIGHT:
+                    await wait_a_bit(5)
+                    await account.claim_daily_insight()
+                if CLAIM_RANK_INSIGHTS:
+                    await wait_a_bit(5)
+                    await account.claim_rank_insights()
+            except Exception as e:
+                wrong_linked_wallet = ''
+                if account.profile["contractInfo"].get("linkedAddress").lower() != address.lower():
+                    wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
+                elif 'execution reverted' in str(e):
+                    wrong_linked_wallet = 'Probably rerun will help'
+                await log_long_exc(idx, f'Claim error. {wrong_linked_wallet}', e)
+                async with claim_error_lock:
+                    claim_error_ids.append(idx)
 
-        logger.info(f'{idx}) Checking insights')
-        await account.check_insights()
+            logger.info(f'{idx}) Checking insights')
+            await account.check_insights()
 
     logger.info(f'{idx}) Account stats:\n{account_info.str_stats()}')
 
@@ -277,6 +303,14 @@ def main():
         logger.error('Prompts count does not match wallets count')
         return
 
+    if WELL_ID_MODE:
+        if len(RING_COUNTRIES) == 0:
+            logger.error('Empty Ring countries in config')
+            return
+    else:
+        logger.error('Farming campaign closed. Use only Well ID Mode')
+        return
+
     storage = Storage('storage/data.json')
     storage.init()
 
@@ -326,14 +360,14 @@ def main():
     logger.info(f'Failed ids: {failed}')
     print()
 
-    logger.info(f'Claim error: {claim_error_ids}')
+    logger.info(f'Claim error: {[i for i in claim_error_ids]}')
     print()
 
     loop.run_until_complete(close_all_sessions())
 
     logger.info(f'Used invites: {used_invites}')
 
-    csv_data = [['#', 'Address', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+    csv_data = [['#', 'Address', 'Well ID', 'Ring Registered', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                  'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe',
                  'Invite codes', 'Exp', 'Lvl']]
     total = {
@@ -348,6 +382,8 @@ def main():
         'to_open': 0,
         'pending': 0,
         'breathe': 0,
+        'well_id': 0,
+        'ring_registered': 0,
     }
     all_invite_codes = []
     daily_available_acc_ids = []
@@ -383,20 +419,22 @@ def main():
         total['pending'] += account.pending_quests
         if account.next_breathe_str() == 'Completed':
             total['breathe'] += 1
+        total['well_id'] += 1 if account.well_id else 0
+        total['ring_registered'] += 1 if account.ring_registered else 0
 
-        csv_data.append([idx, address, acc_total,
+        csv_data.append([idx, address, account.well_id, account.ring_registered, acc_total,
                          account.insights.get('uncommon'), account.insights.get('rare'),
                          account.insights.get('legendary'), account.insights.get('mythical'),
                          account.daily_insight.capitalize(), account.insights_to_open,
                          account.pending_quests, account.daily_mint, account.next_breathe_str(),
                          len(account.invite_codes), account.exp, account.lvl])
 
-    csv_data.extend([[], ['', 'Total', total['total'],
+    csv_data.extend([[], ['', 'Total', total['well_id'], total['ring_registered'], total['total'],
                           total['uncommon'], total['rare'],
                           total['legendary'], total['mythical'],
                           f'{total["daily_available"]}/{total["daily_claimed"]}',
                           total['to_open'], total['pending'], total['daily_minted'], total['breathe']]])
-    csv_data.append(['', '', '', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+    csv_data.append(['', '', 'Well ID', 'Ring Registered', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                      'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe'])
 
     run_timestamp = str(datetime.now())
@@ -413,8 +451,9 @@ def main():
     daily_available_acc_ids = [i for i in daily_available_acc_ids]
     daily_mint_not_done_ids = [i for i in daily_mint_not_done_ids]
 
-    logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
-    logger.info(f'Daily mint not done accounts: {daily_mint_not_done_ids}\n')
+    if not WELL_ID_MODE:
+        logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
+        logger.info(f'Daily mint not done accounts: {daily_mint_not_done_ids}\n')
     logger.info('Stats are stored in results/stats.csv')
     logger.info('Invite codes are stored in results/invites.txt')
     logger.info(f'Timestamp: {run_timestamp}')

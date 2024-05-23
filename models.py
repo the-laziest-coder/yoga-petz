@@ -29,6 +29,8 @@ class AccountInfo:
     insights: dict[str, int] = field(default_factory=dict)
     invite_codes: List[str] = field(default_factory=list)
     mint_prompt: str = ''
+    well_id: bool = False
+    ring_registered: bool = False
 
     def next_breathe_str(self) -> str:
         if type(self.next_breathe_time) is str:
@@ -50,7 +52,9 @@ class AccountInfo:
                f'\tInsights to open: {self.insights_to_open}\n' \
                f'\tDaily insight: {self.daily_insight_colored}\n' \
                f'\tInsights:\n{insights_str}\n' \
-               f'\tInvite codes: {invites_str}\n'
+               f'\tInvite codes: {invites_str}\n' \
+               f'\tWell ID: {self.well_id}\n' \
+               f'\tRing Registered: {self.ring_registered}\n'
 
     @property
     def daily_insight_colored(self):
