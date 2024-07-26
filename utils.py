@@ -24,11 +24,11 @@ async def wait_a_bit(x=1):
 
 
 @retry(tries=MAX_TRIES, delay=1.5, max_delay=10, backoff=2, jitter=(0, 1))
-def get_w3(proxy: str = None):
+def get_w3(proxy: str = None, rpc: str = None):
     if proxy and '|' in proxy:
         proxy = proxy.split('|')[0]
     proxy = None if is_empty(proxy) else proxy
-    return AsyncWeb3(AsyncHTTPProviderWithProxy(RPC, proxy))
+    return AsyncWeb3(AsyncHTTPProviderWithProxy(RPC if rpc is None else rpc, proxy))
 
 
 def to_bytes(hex_str):

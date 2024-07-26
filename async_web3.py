@@ -163,7 +163,7 @@ class AsyncHTTPProviderWithProxy(AsyncJSONBaseProvider):
 
         self.proxy = proxy
 
-        self._request_kwargs = request_kwargs
+        self._request_kwargs = request_kwargs or {}
         if DISABLE_SSL:
             self._request_kwargs.update({'ssl': False})
 

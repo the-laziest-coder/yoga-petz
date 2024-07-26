@@ -8,16 +8,17 @@ from datetime import timedelta
 from typing import Union
 from eth_account.messages import encode_defunct
 from eth_account import Account as EthAccount
+from web3 import Web3
 from web3.contract.async_contract import AsyncContractConstructor
 from web3.exceptions import TransactionNotFound
 
 from well3 import Well3
 from twitter import Twitter
 from models import AccountInfo
-from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER, MINT_DAILY_NFT_PERCENT
+from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER, MINT_DAILY_NFT_PERCENT, RPC_ETH, MAX_ETH_GWEI
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
-    INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC, \
-    MINT_TAGS, MINT_CONTRACT_ADDRESS
+    INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, SCAN_ETH, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC, \
+    MINT_TAGS, MINT_CONTRACT_ADDRESS, CLAIM_HUMAN_PROOF_ADDRESS, CLAIM_HUMAN_PROOF_ABI
 from utils import wait_a_bit, get_w3, to_bytes, async_retry, close_w3, log_long_exc
 
 
@@ -45,6 +46,7 @@ class Account:
         self.pending_quests = None
 
         self.w3 = get_w3(self.account.proxy)
+        self.w3_eth = get_w3(self.account.proxy, rpc=RPC_ETH)
         self.insights_contract = self.w3.eth.contract(INSIGHTS_CONTRACT_ADDRESS, abi=INSIGHTS_CONTRACT_ABI)
         self.private_key = None
 
@@ -427,3 +429,85 @@ class Account:
         await self.check_daily_insight()
         await self.check_rank_insights()
         await self.check_results()
+
+    async def wait_for_eth_gas_price(self):
+        t = 0
+        while (await self.w3_eth.eth.gas_price) > Web3.to_wei(MAX_ETH_GWEI, 'gwei'):
+            gas_price = (await self.w3_eth.eth.gas_price) / 10 ** 9
+            gas_price = round(gas_price, 2)
+            logger.info(f'{self.idx}) Gas price is too high - {gas_price}. Waiting for 10s')
+            t += 10
+            if t >= 360000:
+                break
+            await asyncio.sleep(10)
+
+        if (await self.w3_eth.eth.gas_price) > Web3.to_wei(MAX_ETH_GWEI, 'gwei'):
+            raise Exception('Gas price is too high')
+
+    async def eth_tx_verification(self, tx_hash, action, poll_latency=1):
+        logger.info(f'{self.idx}) {action} - Tx sent')
+        time_passed = 0
+        tx_link = f'{SCAN_ETH}/tx/{tx_hash.hex()}'
+        while time_passed < 150:
+            try:
+                tx_data = await self.w3_eth.eth.get_transaction_receipt(tx_hash)
+                if tx_data is not None:
+                    if tx_data.get('status') == 1:
+                        logger.success(f'{self.idx}) {action} - Successful tx: {tx_link}')
+                    else:
+                        logger.error(f'{self.idx}) {action} - Failed tx: {tx_link}')
+                    return
+            except TransactionNotFound:
+                pass
+
+            time_passed += poll_latency
+            await asyncio.sleep(poll_latency)
+
+        logger.warning(f'{self.idx}) {action} - Pending tx: {tx_link}')
+
+    async def claim_human_proof(self):
+        logger.info(f'{self.idx}) Starting claim 4.2 WELL for human proof')
+
+        contract = self.w3_eth.eth.contract(CLAIM_HUMAN_PROOF_ADDRESS, abi=CLAIM_HUMAN_PROOF_ABI)
+        if await contract.functions.claimedMap(self.account.address).call():
+            logger.info(f'{self.idx}) Already claimed')
+            self.account.claimed_human_proof = True
+        else:
+            user_id = self.profile['user']['userId']
+            sig = await self.well3.get_claim_sig()
+
+            await self.wait_for_eth_gas_price()
+
+            max_priority_fee = await self.w3_eth.eth.max_priority_fee
+            max_fee_per_gas = int((await self.w3_eth.eth.get_block("latest"))["baseFeePerGas"] *
+                                  random.uniform(1.1, 1.3))
+            max_fee_per_gas += max_priority_fee
+
+            tx = await contract.functions.claim(to_bytes(sig), user_id).build_transaction({
+                'from': self.account.address,
+                'nonce': await self.w3_eth.eth.get_transaction_count(self.account.address),
+                'maxPriorityFeePerGas': max_priority_fee,
+                'maxFeePerGas': max_fee_per_gas,
+            })
+            try:
+                estimate = await self.w3_eth.eth.estimate_gas(tx)
+            except Exception as e:
+                raise Exception(f'Tx simulation failed: {str(e)}')
+            tx['gas'] = int(estimate * random.uniform(1.1, 1.3))
+            signed_tx = self.w3_eth.eth.account.sign_transaction(tx, self.private_key)
+            tx_hash = await self.w3_eth.eth.send_raw_transaction(signed_tx.rawTransaction)
+
+            await self.eth_tx_verification(tx_hash, 'Claim Human Proof')
+
+            self.account.claimed_human_proof = True
+
+        current_bybit = self.profile['wellGiveawayByBitAcc']
+        bybit_log = 'No Bybit account provided' if self.account.bybit_id == '' \
+            else ('No need to update Bybit' if current_bybit == self.account.bybit_id
+                  else f'Updating Bybit ID: {self.account.bybit_id}')
+        logger.info(f'{self.idx}) {bybit_log}')
+
+        if self.account.bybit_id == '':
+            return
+
+        await self.well3.submit_bybit()

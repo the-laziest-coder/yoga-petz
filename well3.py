@@ -34,7 +34,7 @@ def _get_headers(info: AccountInfo) -> dict:
 
 class Well3:
     AUTH_API_URL = 'https://well3.com/assets/__/auth/handler'
-    API_URL = 'https://api.well3.com'
+    API_URL = 'https://api.gm.io'
 
     GOOGLE_CREATE_AUTH_HEADERS = {
         'x-client-version': 'Chrome/Handler/2.20.2/FirebaseCore-web',
@@ -299,3 +299,18 @@ class Well3:
                 })
         except Exception as e:
             raise Exception(f'Failed to register for Ring: {e}')
+
+    async def get_claim_sig(self):
+        try:
+            return await self.request('GET', f'{self.API_URL}/well-giveaway/sig',
+                                      [200], lambda r: r, with_text=True)
+        except Exception as e:
+            raise Exception(f'Failed to get claim (human proof) signature: {e}')
+
+    async def submit_bybit(self):
+        try:
+            await self.request('POST', f'{self.API_URL}/well-giveaway', [200], json={
+                'input': self.account.bybit_id,
+            })
+        except Exception as e:
+            raise Exception(f'Failed to submit Bybit: {e}')

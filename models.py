@@ -31,6 +31,8 @@ class AccountInfo:
     mint_prompt: str = ''
     well_id: bool = False
     ring_registered: bool = False
+    bybit_id: str = ''
+    claimed_human_proof: bool = False
 
     def next_breathe_str(self) -> str:
         if type(self.next_breathe_time) is str:
@@ -54,7 +56,9 @@ class AccountInfo:
                f'\tInsights:\n{insights_str}\n' \
                f'\tInvite codes: {invites_str}\n' \
                f'\tWell ID: {self.well_id}\n' \
-               f'\tRing Registered: {self.ring_registered}\n'
+               f'\tRing Registered: {self.ring_registered}\n' \
+               f'\tBybit ID: {self.bybit_id}\n' \
+               f'\tClaimed Human Proof: {self.claimed_human_proof}\n'
 
     @property
     def daily_insight_colored(self):

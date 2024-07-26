@@ -19,7 +19,7 @@ from account import Account
 from config import DO_TASKS, CLAIM_DAILY_INSIGHT, CLAIM_RANK_INSIGHTS, \
     WAIT_BETWEEN_ACCOUNTS, THREADS_NUM, AUTO_UPDATE_INVITES, AUTO_UPDATE_INVITES_FROM_FIRST_COUNT, \
     SKIP_FIRST_ACCOUNTS, MOBILE_PROXY, RANDOM_ORDER, UPDATE_STORAGE_ACCOUNT_INFO, LOOP_RUNS, RANDOM_BATCH_CNT, \
-    RING_COUNTRIES, WELL_ID_MODE
+    RING_COUNTRIES, WELL_ID_MODE, CLAIM_HUMAN_PROOF_MODE
 from utils import wait_a_bit, async_retry, log_long_exc
 
 
@@ -131,7 +131,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
         -> ProcessResult:
     result = ProcessResult()
 
-    idx, (wallet, proxy, twitter_token, prompt) = account_data
+    idx, (wallet, proxy, twitter_token, prompt, bybit) = account_data
     address = EthAccount().from_key(wallet).address
     logger.info(f'{idx}) Processing {address}')
 
@@ -145,6 +145,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
             account_info.twitter_auth_token = twitter_token
         logger.info(f'{idx}) Saved account info restored')
     account_info.mint_prompt = prompt
+    account_info.bybit_id = bybit
 
     if '|' in account_info.proxy:
         change_link = account_info.proxy.split('|')[1]
@@ -180,17 +181,25 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
 
     logger.info(f'{idx}) Signed in')
 
-    if WELL_ID_MODE:
+    if CLAIM_HUMAN_PROOF_MODE:
+        async with Account(idx, account_info, well3, twitter) as account:
+            await account.refresh_profile()
+            await account.link_wallet_if_needed(wallet)
+            await account.claim_human_proof()
+    elif WELL_ID_MODE:
         well_id_info = await well3.well_id()
-        for _ in range(10):
+        for _ in range(3):
             if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
                 logger.info(f'{idx}) Waiting for Well ID mint 10s more')
                 await asyncio.sleep(10)
-                well_id_info = well3.well_id()
+                well_id_info = await well3.well_id()
         if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
-            logger.info(f'{idx}) Minting Well ID takes too long')
+            raise Exception(f'Minting Well ID takes too long')
         else:
             logger.info(f'{idx}) Well ID minted with name {well_id_info["token"].get("name")}')
+            if well_id_info['linkedAddress'].lower() != account_info.address.lower():
+                raise Exception(f'Well ID linked wallet differs from the current one: '
+                                f'{well_id_info["linkedAddress"]}')
             account_info.well_id = True
             if well_id_info['country'] is None:
                 country = random.choice(RING_COUNTRIES)
@@ -198,7 +207,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
                 await well3.ring_register(country)
                 well_id_info = await well3.well_id()
                 if well_id_info['country'] != country:
-                    logger.error(f'{idx}) Failed to register for Ring')
+                    logger.error(f'{idx}) Failed to register for Ring. Mismatched country')
                 else:
                     logger.success(f'{idx}) Successfully registered for Ring')
             else:
@@ -290,6 +299,9 @@ def main():
     with open('files/prompts.txt', 'r', encoding='utf-8') as file:
         prompts = file.read().splitlines()
         prompts = [p.strip() for p in prompts]
+    with open('files/bybits.txt', 'r', encoding='utf-8') as file:
+        bybits = file.read().splitlines()
+        bybits = [b.strip() for b in bybits]
 
     if len(prompts) == 0:
         prompts = ['' for _ in wallets]
@@ -303,12 +315,14 @@ def main():
         logger.error('Prompts count does not match wallets count')
         return
 
+    logger.info(f'Provided {len([b for b in bybits if b != ''])} Bybit accounts')
+    if len(bybits) < len(wallets):
+        bybits.extend(['' for _ in range(len(wallets) - len(bybits))])
+
     if WELL_ID_MODE:
-        if len(RING_COUNTRIES) == 0:
-            logger.error('Empty Ring countries in config')
-            return
-    else:
-        logger.error('Farming campaign closed. Use only Well ID Mode')
+        logger.error('Well ID registration closed. Use only Claim Human Proof Mode')
+    elif not CLAIM_HUMAN_PROOF_MODE:
+        logger.error('Farming campaign closed. Use only Claim Human Proof Mode')
         return
 
     storage = Storage('storage/data.json')
@@ -326,16 +340,17 @@ def main():
     want_only = []
 
     def get_batches(skip: int = None, threads: int = THREADS_NUM):
-        _data = list(enumerate(list(zip(wallets, proxies, twitters, prompts)), start=1))
+        _data = list(enumerate(list(zip(wallets, proxies, twitters, prompts, bybits)), start=1))
         if skip is not None:
             _data = _data[skip:]
         if skip is not None and len(want_only) > 0:
-            _data = [d for d in enumerate(list(zip(wallets, proxies, twitters, prompts)), start=1) if d[0] in want_only]
+            _data = [d for d in enumerate(list(zip(wallets, proxies, twitters, prompts, bybits)), start=1)
+                     if d[0] in want_only]
         if RANDOM_ORDER or RANDOM_BATCH_CNT:
             random.shuffle(_data)
         if RANDOM_BATCH_CNT:
             _data = _data[:RANDOM_BATCH_CNT]
-        _batches: List[List[Tuple[int, Tuple[str, str, str]]]] = [[] for _ in range(threads)]
+        _batches: List[List[Tuple[int, Tuple[str, str, str, str, str]]]] = [[] for _ in range(threads)]
         for _idx, d in enumerate(_data):
             _batches[_idx % threads].append(d)
         return _batches
@@ -367,7 +382,8 @@ def main():
 
     logger.info(f'Used invites: {used_invites}')
 
-    csv_data = [['#', 'Address', 'Well ID', 'Ring Registered', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+    csv_data = [['#', 'Address', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
+                 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                  'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe',
                  'Invite codes', 'Exp', 'Lvl']]
     total = {
@@ -384,6 +400,8 @@ def main():
         'breathe': 0,
         'well_id': 0,
         'ring_registered': 0,
+        'human_proof': 0,
+        'bybit_id': 0,
     }
     all_invite_codes = []
     daily_available_acc_ids = []
@@ -421,20 +439,25 @@ def main():
             total['breathe'] += 1
         total['well_id'] += 1 if account.well_id else 0
         total['ring_registered'] += 1 if account.ring_registered else 0
+        total['human_proof'] += 1 if account.claimed_human_proof else 0
+        total['bybit_id'] += 1 if account.bybit_id != '' else 0
 
-        csv_data.append([idx, address, account.well_id, account.ring_registered, acc_total,
+        csv_data.append([idx, address, account.claimed_human_proof, account.bybit_id,
+                         account.well_id, account.ring_registered, acc_total,
                          account.insights.get('uncommon'), account.insights.get('rare'),
                          account.insights.get('legendary'), account.insights.get('mythical'),
                          account.daily_insight.capitalize(), account.insights_to_open,
                          account.pending_quests, account.daily_mint, account.next_breathe_str(),
                          len(account.invite_codes), account.exp, account.lvl])
 
-    csv_data.extend([[], ['', 'Total', total['well_id'], total['ring_registered'], total['total'],
+    csv_data.extend([[], ['', 'Total', total['human_proof'], total['bybit_id'],
+                          total['well_id'], total['ring_registered'], total['total'],
                           total['uncommon'], total['rare'],
                           total['legendary'], total['mythical'],
                           f'{total["daily_available"]}/{total["daily_claimed"]}',
                           total['to_open'], total['pending'], total['daily_minted'], total['breathe']]])
-    csv_data.append(['', '', 'Well ID', 'Ring Registered', 'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
+    csv_data.append(['', '', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
+                     'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                      'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe'])
 
     run_timestamp = str(datetime.now())

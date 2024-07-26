@@ -26,7 +26,11 @@ BREATHE_SESSION_CONDITION = 'complete-breath-session'
 INSIGHTS_CONTRACT_ADDRESS = '0x73A0469348BcD7AAF70D9E34BBFa794deF56081F'
 INSIGHTS_CONTRACT_ABI = json.load(open('abi/insights.json'))
 
+CLAIM_HUMAN_PROOF_ADDRESS = '0x9164B7D3ab0B5E26CFF7416f911D461c505F20f6'
+CLAIM_HUMAN_PROOF_ABI = json.load(open('abi/claim_human_proof.json'))
+
 SCAN = 'https://opbnb.bscscan.com'
+SCAN_ETH = 'https://etherscan.io'
 
 LOG_RESULT_TOPIC = '0x00c995826b58cdd58dce644ee35d6a6db72c38615f9a3ed6184af4b3d7379540'
 LOG_DATA_NAME_AND_COLOR = [('Uncommon', 'green'), ('Rare', 'cyan'),
