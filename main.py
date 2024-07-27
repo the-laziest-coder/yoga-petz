@@ -315,7 +315,7 @@ def main():
         logger.error('Prompts count does not match wallets count')
         return
 
-    logger.info(f'Provided {len([b for b in bybits if b != ''])} Bybit accounts')
+    logger.info(f'Provided {len([b for b in bybits if b != ""])} Bybit accounts')
     if len(bybits) < len(wallets):
         bybits.extend(['' for _ in range(len(wallets) - len(bybits))])
 
