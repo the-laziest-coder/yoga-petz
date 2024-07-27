@@ -303,8 +303,8 @@ def main():
         bybits = file.read().splitlines()
         bybits = [b.strip() for b in bybits]
 
-    if len(prompts) == 0:
-        prompts = ['' for _ in wallets]
+    if len(prompts) < len(wallets):
+        prompts.extend(['' for _ in range(len(wallets) - len(prompts))])
     if len(wallets) != len(proxies):
         logger.error('Proxies count does not match wallets count')
         return
