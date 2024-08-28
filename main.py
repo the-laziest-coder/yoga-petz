@@ -416,7 +416,7 @@ def main():
         for ic in all_invite_codes:
             file.write(f'{ic}\n')
 
-    logger.info(f'Total airdrop $WELL: {int(total['airdrop'] / 10 ** 18)}')
+    logger.info(f'Total airdrop $WELL: {int(total["airdrop"] / 10 ** 18)}')
     print()
 
     logger.info('Stats are stored in results/stats.csv')
