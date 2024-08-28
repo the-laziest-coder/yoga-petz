@@ -57,8 +57,10 @@ class Twitter:
         if self.proxy and '|' in self.proxy:
             self.proxy = self.proxy.split('|')[0]
         self.proxy = None if is_empty(self.proxy) else self.proxy
+        self.started = False
 
     async def start(self):
+        self.started = True
         ct0 = await self._get_ct0()
         self.cookies.update({'ct0': ct0})
         self.headers.update({'x-csrf-token': ct0})
@@ -71,6 +73,8 @@ class Twitter:
 
     @async_retry
     async def request(self, method, url, acceptable_statuses=None, resp_handler=None, with_text=False, **kwargs):
+        if not self.started:
+            await self.start()
         headers = self.headers.copy()
         cookies = self.cookies.copy()
         if 'headers' in kwargs:

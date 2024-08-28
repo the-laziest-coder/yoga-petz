@@ -1,4 +1,4 @@
-WAIT_BETWEEN_ACCOUNTS = (100, 200)  # in seconds
+WAIT_BETWEEN_ACCOUNTS = (5, 10)  # in seconds
 
 MAX_TRIES = 2
 
@@ -40,3 +40,5 @@ WELL_ID_MODE = False
 # Full list of available countries in files/countries.json
 # Example: ["AD", "AT", "EC"]
 RING_COUNTRIES = []
+
+ONLY_CHECK_AIRDROP = True

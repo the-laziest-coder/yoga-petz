@@ -15,7 +15,7 @@ from web3.exceptions import TransactionNotFound
 from well3 import Well3
 from twitter import Twitter
 from models import AccountInfo
-from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER, MINT_DAILY_NFT_PERCENT, RPC_ETH, MAX_ETH_GWEI
+from config import MIN_INSIGHTS_TO_OPEN, FAKE_TWITTER, MINT_DAILY_NFT_PERCENT, RPC_ETH, MAX_ETH_GWEI, ONLY_CHECK_AIRDROP
 from vars import SHARE_TWEET_FORMAT, WALLET_SIGN_MESSAGE_FORMAT, BREATHE_SESSION_CONDITION, \
     INSIGHTS_CONTRACT_ADDRESS, INSIGHTS_CONTRACT_ABI, SCAN, SCAN_ETH, LOG_DATA_NAME_AND_COLOR, LOG_RESULT_TOPIC, \
     MINT_TAGS, MINT_CONTRACT_ADDRESS, CLAIM_HUMAN_PROOF_ADDRESS, CLAIM_HUMAN_PROOF_ABI
@@ -60,7 +60,7 @@ class Account:
         await self.close()
 
     async def refresh_profile(self):
-        await self.well3.generate_codes()
+        # await self.well3.generate_codes()
         self.profile = await self.well3.me()
         self.account.invite_codes = [rc['code'] for rc in self.profile['referralInfo']['myReferralCodes']
                                      if 'usedAt' not in rc]
@@ -511,3 +511,46 @@ class Account:
             return
 
         await self.well3.submit_bybit()
+
+    async def claim_airdrop(self):
+        details = await self.well3.get_airdrop_details()
+        if type(details) is dict and details.get('error') == 'Not Found':
+            self.account.airdrop = 0
+            return
+        self.account.airdrop = int(details[1])
+        if ONLY_CHECK_AIRDROP:
+            return
+        sig = details[0]
+
+        contract = self.w3_eth.eth.contract(CLAIM_HUMAN_PROOF_ADDRESS, abi=CLAIM_HUMAN_PROOF_ABI)
+        if await contract.functions.signatureClaimedMap(sig).call():
+            logger.info(f'{self.idx}) Airdrop already claimed')
+            self.account.airdrop_claimed = True
+            return
+
+        logger.info(f'{self.idx}) Ready to claim {int(self.account.airdrop / 10 ** 18)} $WELL')
+
+        await self.wait_for_eth_gas_price()
+
+        max_priority_fee = await self.w3_eth.eth.max_priority_fee
+        max_fee_per_gas = int((await self.w3_eth.eth.get_block("latest"))["baseFeePerGas"] *
+                              random.uniform(1.1, 1.3))
+        max_fee_per_gas += max_priority_fee
+
+        tx = await contract.functions.claimV2(to_bytes(sig), self.account.airdrop).build_transaction({
+            'from': self.account.address,
+            'nonce': await self.w3_eth.eth.get_transaction_count(self.account.address),
+            'maxPriorityFeePerGas': max_priority_fee,
+            'maxFeePerGas': max_fee_per_gas,
+        })
+        try:
+            estimate = await self.w3_eth.eth.estimate_gas(tx)
+        except Exception as e:
+            raise Exception(f'Tx simulation failed: {str(e)}')
+        tx['gas'] = int(estimate * random.uniform(1.1, 1.3))
+        signed_tx = self.w3_eth.eth.account.sign_transaction(tx, self.private_key)
+        tx_hash = await self.w3_eth.eth.send_raw_transaction(signed_tx.rawTransaction)
+
+        await self.eth_tx_verification(tx_hash, 'Claim Airdrop')
+
+        self.account.airdrop_claimed = True

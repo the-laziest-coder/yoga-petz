@@ -1,6 +1,6 @@
 aiofiles==23.2.1
-aiohttp==3.8.4
-aiohttp_socks==0.8.4
+aiohttp==3.10.2
+aiohttp_socks==0.9.0
 Brotli==1.0.9
 colorama==0.4.6
 dataclasses_json==0.6.3

@@ -142,7 +142,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
     else:
         if UPDATE_STORAGE_ACCOUNT_INFO:
             account_info.proxy = proxy
-            account_info.twitter_auth_token = twitter_token
+            #account_info.twitter_auth_token = twitter_token
         logger.info(f'{idx}) Saved account info restored')
     account_info.mint_prompt = prompt
     account_info.bybit_id = bybit
@@ -152,7 +152,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
         await change_ip(idx, change_link)
 
     twitter = Twitter(account_info)
-    await twitter.start()
+    # await twitter.start()
 
     well3 = Well3(idx, account_info, twitter)
 
@@ -160,6 +160,7 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
 
     need_invite = await well3.sign_in_or_start_register_if_needed()
     if need_invite:
+        raise Exception('Registering is not available')
         while True:
             invite = await invites.get_invite()
             if invite is None:
@@ -181,70 +182,10 @@ async def process_account(account_data, storage: Storage, invites: InvitesHandle
 
     logger.info(f'{idx}) Signed in')
 
-    if CLAIM_HUMAN_PROOF_MODE:
-        async with Account(idx, account_info, well3, twitter) as account:
-            await account.refresh_profile()
-            await account.link_wallet_if_needed(wallet)
-            await account.claim_human_proof()
-    elif WELL_ID_MODE:
-        well_id_info = await well3.well_id()
-        for _ in range(3):
-            if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
-                logger.info(f'{idx}) Waiting for Well ID mint 10s more')
-                await asyncio.sleep(10)
-                well_id_info = await well3.well_id()
-        if well_id_info['mintInQueue'] or well_id_info.get('token') is None:
-            raise Exception(f'Minting Well ID takes too long')
-        else:
-            logger.info(f'{idx}) Well ID minted with name {well_id_info["token"].get("name")}')
-            if well_id_info['linkedAddress'].lower() != account_info.address.lower():
-                raise Exception(f'Well ID linked wallet differs from the current one: '
-                                f'{well_id_info["linkedAddress"]}')
-            account_info.well_id = True
-            if well_id_info['country'] is None:
-                country = random.choice(RING_COUNTRIES)
-                logger.info(f'{idx}) Registering for Ring for country {country}')
-                await well3.ring_register(country)
-                well_id_info = await well3.well_id()
-                if well_id_info['country'] != country:
-                    logger.error(f'{idx}) Failed to register for Ring. Mismatched country')
-                else:
-                    logger.success(f'{idx}) Successfully registered for Ring')
-            else:
-                logger.info(f'{idx}) Ring registration was already done')
-            account_info.ring_registered = well_id_info['country'] is not None
-    else:
-        async with Account(idx, account_info, well3, twitter) as account:
-
-            await account.refresh_profile()
-
-            logger.info(f'{idx}) Profile refreshed')
-
-            await account.link_wallet_if_needed(wallet)
-
-            if DO_TASKS:
-                if await account.do_quests() > 0:
-                    await account.refresh_profile()
-
-            try:
-                if CLAIM_DAILY_INSIGHT:
-                    await wait_a_bit(5)
-                    await account.claim_daily_insight()
-                if CLAIM_RANK_INSIGHTS:
-                    await wait_a_bit(5)
-                    await account.claim_rank_insights()
-            except Exception as e:
-                wrong_linked_wallet = ''
-                if account.profile["contractInfo"].get("linkedAddress").lower() != address.lower():
-                    wrong_linked_wallet = f'Wrong linked wallet: {account.profile["contractInfo"].get("linkedAddress")}'
-                elif 'execution reverted' in str(e):
-                    wrong_linked_wallet = 'Probably rerun will help'
-                await log_long_exc(idx, f'Claim error. {wrong_linked_wallet}', e)
-                async with claim_error_lock:
-                    claim_error_ids.append(idx)
-
-            logger.info(f'{idx}) Checking insights')
-            await account.check_insights()
+    async with Account(idx, account_info, well3, twitter) as account:
+        await account.refresh_profile()
+        await account.link_wallet_if_needed(wallet)
+        await account.claim_airdrop()
 
     logger.info(f'{idx}) Account stats:\n{account_info.str_stats()}')
 
@@ -382,7 +323,7 @@ def main():
 
     logger.info(f'Used invites: {used_invites}')
 
-    csv_data = [['#', 'Address', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
+    csv_data = [['#', 'Address', 'Airdrop', 'Airdrop Claimed', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
                  'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                  'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe',
                  'Invite codes', 'Exp', 'Lvl']]
@@ -402,6 +343,8 @@ def main():
         'ring_registered': 0,
         'human_proof': 0,
         'bybit_id': 0,
+        'airdrop': 0,
+        'airdrop_claimed': 0,
     }
     all_invite_codes = []
     daily_available_acc_ids = []
@@ -419,6 +362,8 @@ def main():
         acc_total = account.insights.get('uncommon', 0) + account.insights.get('rare', 0) + \
             account.insights.get('legendary', 0) + account.insights.get('mythical', 0)
 
+        total['airdrop'] += account.airdrop
+        total['airdrop_claimed'] += 1 if account.airdrop_claimed else 0
         total['total'] += acc_total
         total['uncommon'] += account.insights.get('uncommon', 0)
         total['rare'] += account.insights.get('rare', 0)
@@ -442,7 +387,7 @@ def main():
         total['human_proof'] += 1 if account.claimed_human_proof else 0
         total['bybit_id'] += 1 if account.bybit_id != '' else 0
 
-        csv_data.append([idx, address, account.claimed_human_proof, account.bybit_id,
+        csv_data.append([idx, address, int(account.airdrop / 10 ** 18), account.airdrop_claimed, account.claimed_human_proof, account.bybit_id,
                          account.well_id, account.ring_registered, acc_total,
                          account.insights.get('uncommon'), account.insights.get('rare'),
                          account.insights.get('legendary'), account.insights.get('mythical'),
@@ -450,13 +395,13 @@ def main():
                          account.pending_quests, account.daily_mint, account.next_breathe_str(),
                          len(account.invite_codes), account.exp, account.lvl])
 
-    csv_data.extend([[], ['', 'Total', total['human_proof'], total['bybit_id'],
+    csv_data.extend([[], ['', 'Total', int(total['airdrop'] / 10 ** 18), total['airdrop_claimed'], total['human_proof'], total['bybit_id'],
                           total['well_id'], total['ring_registered'], total['total'],
                           total['uncommon'], total['rare'],
                           total['legendary'], total['mythical'],
                           f'{total["daily_available"]}/{total["daily_claimed"]}',
                           total['to_open'], total['pending'], total['daily_minted'], total['breathe']]])
-    csv_data.append(['', '', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
+    csv_data.append(['', '', 'Airdrop', 'Airdrop Claimed', 'Human Proof', 'Bybit ID', 'Well ID', 'Ring Registered',
                      'Total', 'Uncommon', 'Rare', 'Legendary', 'Mythical',
                      'Daily insight', 'Insights to open', 'Pending quests', 'Daily mint', 'Next breathe'])
 
@@ -471,12 +416,9 @@ def main():
         for ic in all_invite_codes:
             file.write(f'{ic}\n')
 
-    daily_available_acc_ids = [i for i in daily_available_acc_ids]
-    daily_mint_not_done_ids = [i for i in daily_mint_not_done_ids]
+    logger.info(f'Total airdrop $WELL: {int(total['airdrop'] / 10 ** 18)}')
+    print()
 
-    if not WELL_ID_MODE:
-        logger.info(f'Daily available accounts: {daily_available_acc_ids}\n')
-        logger.info(f'Daily mint not done accounts: {daily_mint_not_done_ids}\n')
     logger.info('Stats are stored in results/stats.csv')
     logger.info('Invite codes are stored in results/invites.txt')
     logger.info(f'Timestamp: {run_timestamp}')

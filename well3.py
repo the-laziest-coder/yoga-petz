@@ -314,3 +314,10 @@ class Well3:
             })
         except Exception as e:
             raise Exception(f'Failed to submit Bybit: {e}')
+
+    async def get_airdrop_details(self):
+        try:
+            return await self.request('GET', f'{self.API_URL}/well-giveaway/sig2',
+                                      [200, 404], lambda r: r, with_text=False)
+        except Exception as e:
+            raise Exception(f'Failed to get airdrop details: {e}')
