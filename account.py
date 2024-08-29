@@ -523,7 +523,7 @@ class Account:
         sig = details[0]
 
         contract = self.w3_eth.eth.contract(CLAIM_HUMAN_PROOF_ADDRESS, abi=CLAIM_HUMAN_PROOF_ABI)
-        if await contract.functions.signatureClaimedMap(sig).call():
+        if await contract.functions.isSignatureClaimed(to_bytes(sig)).call():
             logger.info(f'{self.idx}) Airdrop already claimed')
             self.account.airdrop_claimed = True
             return
